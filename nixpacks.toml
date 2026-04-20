@@ -2,7 +2,7 @@
 nixPkgs = ["python311"]
 
 [phases.install]
-cmds = ["pip install -r server/requirements.txt"]
+cmds = ["python3.11 -m pip install -r server/requirements.txt"]
 
 [start]
 cmd = "uvicorn server.main:app --host 0.0.0.0 --port $PORT"

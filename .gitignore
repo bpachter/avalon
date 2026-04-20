@@ -1,0 +1,9 @@
+client/node_modules/
+client/dist/
+scoring/data/raw/
+scoring/data/interim/
+scoring/data/processed/
+__pycache__/
+*.pyc
+.env
+*.db

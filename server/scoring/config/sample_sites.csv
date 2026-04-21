@@ -1,0 +1,11 @@
+site_id,name,lat,lon,acres,state,notes
+TX-ABL-001,Abilene TX (Stargate corridor),32.4487,-99.7331,1200,TX,Near OpenAI/Oracle Stargate site
+TX-TMP-001,Temple TX,31.0982,-97.3428,800,TX,ERCOT load zone South
+VA-LDN-001,Loudoun County VA (Data Center Alley),39.0840,-77.6555,300,VA,Established hyperscaler hub
+GA-DGL-001,Douglas County GA,33.7515,-84.7477,500,GA,Microsoft/Google active
+AZ-PHX-001,Phoenix West Valley AZ,33.5807,-112.4150,600,AZ,Goodyear/Buckeye corridor
+IA-DSM-001,Altoona IA,41.6383,-93.4699,500,IA,Meta/Microsoft cluster
+WI-MTP-001,Mount Pleasant WI,42.7039,-87.8843,1000,WI,Microsoft Foxconn site
+WA-QCY-001,Quincy WA,47.2334,-119.8523,400,WA,Hydro power, Microsoft hub
+NE-OMA-001,Omaha NE (Sarpy County),41.1399,-96.0353,500,NE,Google/Meta/Microsoft cluster
+TN-CLA-001,Clarksville TN,36.5298,-87.3595,450,TN,Google site, TVA power

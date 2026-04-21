@@ -1,0 +1,56 @@
+{
+  "_comment": "Factor weights per data-center archetype. Each archetype's weights MUST sum to 1.0. Values reflect what hyperscalers actually optimize as of 2025-2026 (power-constrained AI build-out).",
+  "archetypes": {
+    "training": {
+      "_description": "Multi-hundred-MW to GW training cluster. Power-dominant. Latency tolerant.",
+      "power_transmission": 0.20,
+      "power_cost":         0.12,
+      "power_carbon":       0.04,
+      "gas_pipeline":       0.08,
+      "fiber":              0.08,
+      "water":              0.08,
+      "climate":            0.06,
+      "hazard":             0.05,
+      "land_zoning":        0.08,
+      "tax_incentives":     0.07,
+      "permitting":         0.07,
+      "latency":            0.02,
+      "labor":              0.03,
+      "community":          0.02
+    },
+    "inference": {
+      "_description": "Latency-sensitive inference / edge region. Smaller (50-200 MW). Latency-dominant.",
+      "power_transmission": 0.10,
+      "power_cost":         0.08,
+      "power_carbon":       0.04,
+      "gas_pipeline":       0.03,
+      "fiber":              0.15,
+      "water":              0.04,
+      "climate":            0.05,
+      "hazard":             0.05,
+      "land_zoning":        0.06,
+      "tax_incentives":     0.07,
+      "permitting":         0.08,
+      "latency":            0.18,
+      "labor":              0.04,
+      "community":          0.03
+    },
+    "mixed": {
+      "_description": "Balanced training + inference campus. Default if archetype unspecified.",
+      "power_transmission": 0.16,
+      "power_cost":         0.10,
+      "power_carbon":       0.04,
+      "gas_pipeline":       0.06,
+      "fiber":              0.11,
+      "water":              0.06,
+      "climate":            0.05,
+      "hazard":             0.05,
+      "land_zoning":        0.07,
+      "tax_incentives":     0.07,
+      "permitting":         0.08,
+      "latency":            0.09,
+      "labor":              0.03,
+      "community":          0.03
+    }
+  }
+}

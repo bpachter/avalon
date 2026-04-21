@@ -1,0 +1,40 @@
+{
+  "_comment": "Hard disqualifiers. If ANY criterion is True for a site, the composite score is clamped to 0.0 and the site is flagged. Tunable per archetype; defaults below apply unless overridden.",
+  "criteria": {
+    "in_fema_100yr_floodplain": {
+      "description": "Any portion of the parcel inside a FEMA 100-year (1% annual) floodplain.",
+      "source": "FEMA NFHL",
+      "default": true
+    },
+    "no_transmission_within_15mi": {
+      "description": "No ≥230 kV transmission line within 15 miles.",
+      "source": "HIFLD Transmission Lines",
+      "default": true
+    },
+    "no_fiber_within_25mi": {
+      "description": "No long-haul fiber route within 25 miles.",
+      "source": "HIFLD Long-haul Fiber",
+      "default": true
+    },
+    "active_dc_moratorium": {
+      "description": "County or municipality has an active data-center moratorium ordinance.",
+      "source": "County minutes scrape + news graph",
+      "default": true
+    },
+    "zoning_forbids_data_center": {
+      "description": "Current zoning explicitly forbids data-center / heavy-industrial use AND no rezoning path is documented.",
+      "source": "County parcel/zoning GIS",
+      "default": true
+    },
+    "seismic_pga_above_0_5g": {
+      "description": "USGS 2% in 50-yr peak ground acceleration > 0.5g.",
+      "source": "USGS National Seismic Hazard Map",
+      "default": true
+    },
+    "wet_bulb_p99_above_30c": {
+      "description": "ASHRAE p99 wet-bulb > 30°C makes evaporative cooling untenable without huge water spend.",
+      "source": "ASHRAE TMY / NOAA NCEI",
+      "default": false
+    }
+  }
+}

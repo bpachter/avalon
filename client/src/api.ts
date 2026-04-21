@@ -117,9 +117,26 @@ export interface ParcelAttrs {
     subtype?: string | null
     in_special_flood_hazard_area?: boolean
   }
+  substation?: {
+    id?: unknown
+    name?: string | null
+    owner?: string | null
+    operator?: string | null
+    type?: string | null
+    status?: string | null
+    max_voltage_kv?: number | string | null
+    min_voltage_kv?: number | string | null
+    lines_in?: number | string | null
+    source?: string | null
+    source_date?: string | null
+    county?: string | null
+    state?: string | null
+    all_fields?: Record<string, unknown>
+  }
   parcel_error?: string
   census_error?: string
   flood_error?: string
+  substation_error?: string
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────

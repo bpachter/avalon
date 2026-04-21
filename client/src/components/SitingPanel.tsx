@@ -1116,6 +1116,33 @@ export default function SitingPanel() {
                 </>
               )}
 
+              {parcelPopup.attrs?.substation && (
+                <>
+                  <div className="parcel-section">SUBSTATION ON PARCEL</div>
+                  {[
+                    ['name',           parcelPopup.attrs.substation.name],
+                    ['owner',          parcelPopup.attrs.substation.owner],
+                    ['operator',       parcelPopup.attrs.substation.operator],
+                    ['type',           parcelPopup.attrs.substation.type],
+                    ['status',         parcelPopup.attrs.substation.status],
+                    ['max voltage kV', parcelPopup.attrs.substation.max_voltage_kv],
+                    ['min voltage kV', parcelPopup.attrs.substation.min_voltage_kv],
+                    ['lines in',       parcelPopup.attrs.substation.lines_in],
+                    ['county',         parcelPopup.attrs.substation.county],
+                    ['state',          parcelPopup.attrs.substation.state],
+                    ['source',         parcelPopup.attrs.substation.source],
+                    ['source date',    parcelPopup.attrs.substation.source_date],
+                  ]
+                    .filter(([, v]) => v !== undefined && v !== null && v !== '' && v !== 'NOT AVAILABLE')
+                    .map(([label, v]) => (
+                      <div className="parcel-row" key={String(label)}>
+                        <span>{label}</span>
+                        <span>{String(v)}</span>
+                      </div>
+                    ))}
+                </>
+              )}
+
               <div className="parcel-section">PROXIMITY</div>
               {parcelPopup.loading && <div className="parcel-row"><span>computing…</span></div>}
               {parcelPopup.detail?.results.map(r => (

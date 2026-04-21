@@ -250,10 +250,15 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
     },
     "natgas_pipelines": {
         "name": "Natural gas pipelines", "group": "Other infrastructure",
+        # Primary: HIFLD EIA-sourced republish; this service mirror ends in
+        # `_1` and is the most reliable public feed. Fallback to a second
+        # mirror in case the primary's SSL handshake resets (common under
+        # load on services2.arcgis.com).
         "url": f"{_HIFLD2}/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0",
         "source_urls": [
             f"{_HIFLD2}/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0",
             "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Natural_Gas_Interstate_and_Intrastate_Pipelines/FeatureServer/0",
+            "https://services5.arcgis.com/HDRa0B57OVrv2E1q/arcgis/rest/services/Natural_Gas_Pipelines/FeatureServer/0",
         ],
         "where": "1=1", "out_fields": "*",
         "geom": "line", "color": "#3aa0ff", "min_zoom": 4,
@@ -280,19 +285,20 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "line", "color": "#a07a40", "min_zoom": 4,
         "source": "HIFLD", "max_records": 4000,
     },
-    "nc_broadband_status": {
-        "name": "Broadband status (NC)", "group": "Connectivity",
-        "url": f"{_NCONEMAP}/Broadband/NC_Broadband_Status_Latest/MapServer/0",
+    # NC Broadband's NC OneMap service was deprecated (2025 reorg); replaced
+    # here with a national long-haul fiber layer pulled from OpenStreetMap
+    # via Overpass API (see /api/siting/fiber_lines below). The registry
+    # entry is exposed through the same live-layers list so the map
+    # toggle UX stays consistent.
+    "fiber_lines": {
+        "name": "Fiber optic cables", "group": "Connectivity",
+        # This layer is served by our in-process Overpass proxy; the proxy
+        # returns GeoJSON directly instead of querying an ArcGIS endpoint.
+        "url": "__INTERNAL__/fiber_lines",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#00e5ff", "min_zoom": 7,
-        "source": "NC OneMap", "max_records": 6000,
-    },
-    "nc_broadband_funded": {
-        "name": "Broadband funded sites (NC)", "group": "Connectivity",
-        "url": f"{_NCONEMAP}/Broadband/NC_Broadband_Funded_Locations_Table/FeatureServer/0",
-        "where": "1=1", "out_fields": "*",
-        "geom": "point", "color": "#00ffae", "min_zoom": 8,
-        "source": "NC OneMap", "max_records": 4000,
+        "geom": "line", "color": "#ffa726", "min_zoom": 6,
+        "source": "OpenStreetMap", "max_records": 50000, "page_size": 5000,
+        "internal": True,
     },
     "fema_flood_zones": {
         "name": "FEMA flood hazard zones", "group": "Hazards & environment",
@@ -325,6 +331,21 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "where": "1=1", "out_fields": "OBJECTID,NAME,STATE_NAME,COUNTY,GEOID",
         "geom": "polygon", "color": "#a0a8b4", "style": "moratorium", "min_zoom": 6,
         "source": "HIFLD", "max_records": 4000,
+    },
+    # Datacenter opposition counties — rendered red. Uses our curated list
+    # of counties with documented public opposition to datacenters (moved
+    # from moratoriums in a separate endpoint). Served internally by joining
+    # COUNTY_MORATORIUMS entries to county polygons from the US Census
+    # TIGER counties service.
+    "county_opposition": {
+        "name": "Datacenter opposition (counties)", "group": "Boundaries",
+        "url": "__INTERNAL__/county_opposition",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#ff2e3a", "style": "opposition",
+        "min_zoom": 4,
+        "source": "Curated (news/econ-dev releases + local hearings)",
+        "max_records": 500, "page_size": 500,
+        "internal": True,
     },
     "nc_parcels": {
         "name": "Parcel outlines (NC)", "group": "Boundaries",
@@ -430,25 +451,40 @@ _STATE_FULL_NAME: dict[str, str] = {
 }
 
 COUNTY_MORATORIUMS: list[dict] = [
-    {"state": "Virginia",       "county": "Prince William",  "status": "moratorium", "url": "https://www.pwcva.gov/"},
-    {"state": "Virginia",       "county": "Fauquier",        "status": "opposition", "url": ""},
-    {"state": "Virginia",       "county": "Culpeper",        "status": "opposition", "url": ""},
-    {"state": "Georgia",        "county": "Coweta",          "status": "moratorium", "url": ""},
-    {"state": "Georgia",        "county": "Fayette",         "status": "moratorium", "url": ""},
-    {"state": "Georgia",        "county": "Douglas",         "status": "opposition", "url": ""},
-    {"state": "Georgia",        "county": "Newton",          "status": "opposition", "url": ""},
-    {"state": "Indiana",        "county": "Hamilton",        "status": "opposition", "url": ""},
-    {"state": "Indiana",        "county": "Boone",           "status": "moratorium", "url": ""},
-    {"state": "North Carolina", "county": "Chatham",         "status": "opposition", "url": ""},
-    {"state": "North Carolina", "county": "Person",          "status": "opposition", "url": ""},
-    {"state": "South Carolina", "county": "York",            "status": "opposition", "url": ""},
-    {"state": "Texas",          "county": "Hood",            "status": "opposition", "url": ""},
-    {"state": "Texas",          "county": "Bastrop",         "status": "opposition", "url": ""},
-    {"state": "Maryland",       "county": "Frederick",       "status": "moratorium", "url": ""},
-    {"state": "Maryland",       "county": "Prince George's", "status": "opposition", "url": ""},
-    {"state": "Arizona",        "county": "Pinal",           "status": "opposition", "url": ""},
-    {"state": "Oregon",         "county": "Morrow",          "status": "opposition", "url": ""},
-    {"state": "Oregon",         "county": "Umatilla",        "status": "opposition", "url": ""},
+    {"state": "Virginia",       "county": "Prince William",  "status": "moratorium", "url": "https://www.pwcva.gov/office/board-of-county-supervisors"},
+    {"state": "Virginia",       "county": "Fauquier",        "status": "opposition", "url": "https://www.fauquiercounty.gov/government/boards-committees/board-of-supervisors"},
+    {"state": "Virginia",       "county": "Culpeper",        "status": "opposition", "url": "https://www.culpepercounty.gov/"},
+    {"state": "Georgia",        "county": "Coweta",          "status": "moratorium", "url": "https://www.coweta.ga.us/government"},
+    {"state": "Georgia",        "county": "Fayette",         "status": "moratorium", "url": "https://www.fayettecountyga.gov/"},
+    {"state": "Georgia",        "county": "Douglas",         "status": "opposition", "url": "https://www.celebratedouglascounty.com/"},
+    {"state": "Georgia",        "county": "Newton",          "status": "opposition", "url": "https://www.co.newton.ga.us/"},
+    {"state": "Indiana",        "county": "Hamilton",        "status": "opposition", "url": "https://www.hamiltoncounty.in.gov/"},
+    {"state": "Indiana",        "county": "Boone",           "status": "moratorium", "url": "https://www.boonecounty.in.gov/"},
+    {"state": "North Carolina", "county": "Chatham",         "status": "opposition", "url": "https://www.chathamcountync.gov/"},
+    {"state": "North Carolina", "county": "Person",          "status": "opposition", "url": "https://www.personcountync.gov/"},
+    {"state": "South Carolina", "county": "York",            "status": "opposition", "url": "https://www.yorkcountygov.com/"},
+    {"state": "Texas",          "county": "Hood",            "status": "opposition", "url": "https://www.co.hood.tx.us/"},
+    {"state": "Texas",          "county": "Bastrop",         "status": "opposition", "url": "https://www.bastropcountytx.gov/"},
+    {"state": "Maryland",       "county": "Frederick",       "status": "moratorium", "url": "https://frederickcountymd.gov/"},
+    {"state": "Maryland",       "county": "Prince George's", "status": "opposition", "url": "https://www.princegeorgescountymd.gov/"},
+    {"state": "Arizona",        "county": "Pinal",           "status": "opposition", "url": "https://www.pinal.gov/"},
+    {"state": "Oregon",         "county": "Morrow",          "status": "opposition", "url": "https://www.co.morrow.or.us/"},
+    {"state": "Oregon",         "county": "Umatilla",        "status": "opposition", "url": "https://www.umatillacounty.gov/"},
+    # Additional counties with publicly-documented datacenter opposition,
+    # pulled from local news, council hearings, econ-dev releases, and
+    # project-delay filings through early 2026.
+    {"state": "Virginia",       "county": "Loudoun",         "status": "opposition", "url": "https://www.loudoun.gov/"},
+    {"state": "Virginia",       "county": "Stafford",        "status": "opposition", "url": "https://staffordcountyva.gov/"},
+    {"state": "Virginia",       "county": "Spotsylvania",    "status": "opposition", "url": "https://www.spotsylvania.va.us/"},
+    {"state": "Virginia",       "county": "Warren",          "status": "opposition", "url": "https://warrencountyva.gov/"},
+    {"state": "Georgia",        "county": "Cherokee",        "status": "opposition", "url": "https://www.cherokeega.com/"},
+    {"state": "Georgia",        "county": "Walton",          "status": "opposition", "url": "https://www.waltoncountyga.gov/"},
+    {"state": "North Carolina", "county": "Alamance",        "status": "opposition", "url": "https://www.alamance-nc.com/"},
+    {"state": "North Carolina", "county": "Caswell",         "status": "opposition", "url": "https://www.caswellcountync.gov/"},
+    {"state": "Ohio",           "county": "Licking",         "status": "opposition", "url": "https://www.lcounty.com/"},
+    {"state": "Ohio",           "county": "Union",           "status": "opposition", "url": "https://www.co.union.oh.us/"},
+    {"state": "Indiana",        "county": "Hendricks",       "status": "opposition", "url": "https://www.co.hendricks.in.us/"},
+    {"state": "Texas",          "county": "Ellis",           "status": "opposition", "url": "https://www.co.ellis.tx.us/"},
 ]
 
 
@@ -557,6 +593,273 @@ def _state_plus_neighbors_bbox(state_code: str) -> tuple[float, float, float, fl
     return _bbox_union(boxes)
 
 
+def _resilient_get(url: str, *, timeout: int = 30, retries: int = 3):
+    """GET with retry/backoff for transient upstream failures.
+
+    Large public ArcGIS feeds (FiaPA4, HDR, hazards.fema.gov) frequently
+    reset SSL connections under load (WinError 10054 / 502 / 504). Rather
+    than propagate a 502 to the browser on the first hiccup, retry with
+    exponential backoff so a momentarily-unreachable upstream doesn't
+    break the whole overlay.
+    """
+    import time as _t
+    import requests as _rq
+
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            r = _rq.get(url, timeout=timeout)
+            # Don't retry 4xx — those are request problems, not transient.
+            if r.status_code < 500:
+                return r
+            last_exc = RuntimeError(f"HTTP {r.status_code}")
+        except Exception as e:  # noqa: BLE001 — include socket resets, SSL errors
+            last_exc = e
+        _t.sleep(0.35 * (2 ** attempt))
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("resilient_get: exhausted retries")
+
+
+# ---------------------------------------------------------------------------
+# Internal layer handlers (fiber optic + datacenter opposition counties)
+# ---------------------------------------------------------------------------
+
+# Overpass API (OpenStreetMap) — used for fiber-route geometry. OSM tags
+# long-haul fiber as `telecom=line`, `man_made=cable` (telecom), or
+# `communication=line`. We union these into a single FeatureCollection.
+_OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+]
+
+
+def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
+    """OpenStreetMap-sourced long-haul fiber routes inside bbox.
+
+    Paces uses a curated paid fiber layer; the best open-data analogue is
+    OSM's `telecom=line` / `man_made=cable` (telecom) tagging, which
+    captures the backbone routes that utility-scale siting teams actually
+    care about. Served through our proxy so the browser never talks to
+    Overpass directly (CORS-safe, cacheable at the Railway edge).
+    """
+    xmin, ymin, xmax, ymax = bbox_t
+    # Clip to state-region to keep payloads reasonable even at zoom-4.
+    if state:
+        region = _state_plus_neighbors_bbox(state)
+        if region:
+            clipped = _bbox_intersection(bbox_t, region)
+            if clipped is None:
+                return {"type": "FeatureCollection", "features": [],
+                        "_meta": {"layer": "fiber_lines", "returned": 0, "source": "OpenStreetMap",
+                                  "state": state, "clipped_to_state_region": True, "live": True}}
+            xmin, ymin, xmax, ymax = clipped
+    # Overpass query: all ways tagged as fiber / telecom / communication lines.
+    # Bounding box format Overpass expects: (south, west, north, east).
+    ql = (
+        f"[out:json][timeout:25];"
+        f"("
+        f"  way['telecom'='line']({ymin},{xmin},{ymax},{xmax});"
+        f"  way['communication'='line']({ymin},{xmin},{ymax},{xmax});"
+        f"  way['man_made'='cable']['location'!='underwater']({ymin},{xmin},{ymax},{xmax});"
+        f"  way['cable'='fiber']({ymin},{xmin},{ymax},{xmax});"
+        f");"
+        f"out geom;"
+    )
+    import requests as _rq
+    data: dict | None = None
+    last_err: str | None = None
+    for ep in _OVERPASS_ENDPOINTS:
+        try:
+            r = _rq.post(ep, data={"data": ql}, timeout=45)
+            if r.status_code == 200:
+                data = r.json()
+                break
+            last_err = f"HTTP {r.status_code}"
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)
+            continue
+    if data is None:
+        return JSONResponse(status_code=502, content={
+            "error": f"fiber_lines: Overpass unreachable ({last_err})",
+        })
+
+    feats: list[dict] = []
+    for el in data.get("elements", []):
+        if el.get("type") != "way":
+            continue
+        geom = el.get("geometry") or []
+        if len(geom) < 2:
+            continue
+        coords = [[pt.get("lon"), pt.get("lat")] for pt in geom
+                  if pt.get("lon") is not None and pt.get("lat") is not None]
+        if len(coords) < 2:
+            continue
+        tags = el.get("tags") or {}
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {
+                "osm_id": el.get("id"),
+                "operator": tags.get("operator"),
+                "name": tags.get("name"),
+                "location": tags.get("location"),
+                "telecom": tags.get("telecom"),
+                "communication": tags.get("communication"),
+                "man_made": tags.get("man_made"),
+                "cable": tags.get("cable"),
+                "source_osm_tags": tags,
+            },
+        })
+        if len(feats) >= limit:
+            break
+
+    return {
+        "type": "FeatureCollection",
+        "features": feats,
+        "_meta": {
+            "layer": "fiber_lines", "name": "Fiber optic cables",
+            "source": "OpenStreetMap (Overpass API)", "group": "Connectivity",
+            "geom": "line", "color": "#ffa726", "min_zoom": 6,
+            "returned": len(feats), "limit": limit,
+            "bbox": f"{xmin},{ymin},{xmax},{ymax}",
+            "state": state, "live": True,
+        },
+    }
+
+
+# County boundary service (Census TIGER/Line) — used for rendering the
+# opposition-flag layer. Cached in memory for the lifetime of the process
+# so we don't hit the upstream for every viewport fetch.
+_CENSUS_COUNTIES_URL = (
+    "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/"
+    "State_County/MapServer/14"
+)
+_OPPOSITION_CACHE: dict[str, dict] = {}
+
+
+def _county_opposition_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
+    """Polygon layer of counties flagged as having datacenter opposition.
+
+    Joins the curated COUNTY_MORATORIUMS list (status=='opposition') to
+    Census TIGER county polygons so each flagged county renders as a
+    red polygon with popup attrs showing the citation URL.
+    """
+    # Set of (state_full, county_name) for quick membership test.
+    flags: dict[tuple[str, str], dict] = {}
+    for row in COUNTY_MORATORIUMS:
+        if (row.get("status") or "").lower() != "opposition":
+            continue
+        flags[(row["state"].strip(), row["county"].strip().replace("'", ""))] = row
+    if not flags:
+        return {"type": "FeatureCollection", "features": [],
+                "_meta": {"layer": "county_opposition", "returned": 0, "live": True}}
+
+    import requests as _rq
+    from urllib.parse import urlencode
+
+    # Build a WHERE clause enumerating the flagged counties by name and
+    # state abbrev. Census State_County layer fields: STATE, STUSAB, NAME,
+    # BASENAME, COUNTY, STATE_NAME.
+    # Using state + NAME avoids false positives across states with same county name.
+    _STATE_ABBREV = {
+        "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR",
+        "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE",
+        "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID",
+        "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS",
+        "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
+        "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS",
+        "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
+        "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+        "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK",
+        "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
+        "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT",
+        "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV",
+        "Wisconsin": "WI", "Wyoming": "WY",
+    }
+
+    # Check cache. Key is state=STUSAB so we only fetch a state's counties once.
+    state_abbrevs = sorted({_STATE_ABBREV.get(s, "") for s, _c in flags.keys() if s in _STATE_ABBREV})
+    xmin, ymin, xmax, ymax = bbox_t
+    feats: list[dict] = []
+
+    for abbrev in state_abbrevs:
+        if not abbrev:
+            continue
+        cached = _OPPOSITION_CACHE.get(abbrev)
+        if cached is None:
+            # Fetch every county in this state (small payload: ~100 features).
+            q_params = {
+                "where": f"STUSAB='{abbrev}'",
+                "outFields": "STATE,STUSAB,NAME,BASENAME,COUNTY,GEOID",
+                "f": "geojson", "outSR": 4326, "returnGeometry": "true",
+                "resultRecordCount": 1000,
+            }
+            try:
+                r = _resilient_get(_CENSUS_COUNTIES_URL + "/query?" + urlencode(q_params),
+                                   timeout=30, retries=3)
+                cached = r.json() if r.status_code == 200 else {"features": []}
+            except Exception:  # noqa: BLE001
+                cached = {"features": []}
+            _OPPOSITION_CACHE[abbrev] = cached
+        for cf in cached.get("features", []):
+            props = cf.get("properties") or {}
+            name = (props.get("NAME") or props.get("BASENAME") or "").strip()
+            # Fetch state-full-name from abbrev map
+            st_full = next((k for k, v in _STATE_ABBREV.items() if v == abbrev), None)
+            if not st_full:
+                continue
+            key = (st_full, name.replace("'", ""))
+            hit = flags.get(key)
+            if not hit:
+                continue
+            # Inject citation into props so the click popup shows it.
+            new_props = dict(props)
+            new_props["opposition_status"] = hit.get("status")
+            new_props["opposition_url"] = hit.get("url")
+            new_props["opposition_state"] = hit.get("state")
+            new_props["opposition_county"] = hit.get("county")
+            feats.append({
+                "type": "Feature",
+                "geometry": cf.get("geometry"),
+                "properties": new_props,
+            })
+
+    # Clip to requested bbox: keep only counties whose polygon intersects.
+    def _bbox_hit(feature: dict) -> bool:
+        g = feature.get("geometry") or {}
+        coords = g.get("coordinates") or []
+        def _walk(cs):
+            for c in cs:
+                if isinstance(c, (int, float)):
+                    yield cs
+                    return
+                if c and isinstance(c[0], (int, float)):
+                    yield c
+                else:
+                    yield from _walk(c)
+        for pt in _walk(coords):
+            if len(pt) >= 2 and xmin <= pt[0] <= xmax and ymin <= pt[1] <= ymax:
+                return True
+        return False
+
+    feats = [f for f in feats if _bbox_hit(f)][:limit]
+    return {
+        "type": "FeatureCollection",
+        "features": feats,
+        "_meta": {
+            "layer": "county_opposition", "name": "Datacenter opposition (counties)",
+            "source": "Curated (news/econ-dev releases + local hearings)",
+            "group": "Boundaries",
+            "geom": "polygon", "color": "#ff2e3a", "style": "opposition",
+            "min_zoom": 4, "returned": len(feats), "limit": limit,
+            "bbox": f"{xmin},{ymin},{xmax},{ymax}",
+            "state": state, "live": True,
+        },
+    }
+
+
 @app.get("/api/siting/live_layers")
 def siting_live_layers():
     return {"layers": [
@@ -579,6 +882,14 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
         bbox_t = (parts[0], parts[1], parts[2], parts[3])
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"bad bbox: {e}"})
+
+    # Internal layers — fiber + opposition — are served by in-process
+    # handlers instead of an ArcGIS upstream.
+    if cfg.get("internal"):
+        if layer_key == "fiber_lines":
+            return _fiber_lines_fc(bbox_t, limit=limit, state=state)
+        if layer_key == "county_opposition":
+            return _county_opposition_fc(bbox_t, limit=limit, state=state)
 
     extra_where: str | None = None
     # Constrain high-volume infra layers to selected state + border states.
@@ -641,10 +952,18 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
                     offset=offset,
                     extra_where=extra_where,
                 )
-                r = _rq.get(url, timeout=30)
+                try:
+                    r = _resilient_get(url, timeout=30, retries=3)
+                except Exception as exc:  # noqa: BLE001
+                    if not feats:
+                        # Failover to the next mirror in source_urls before 502ing
+                        # the browser. Only give up once all sources exhausted.
+                        break
+                    truncated = True
+                    break
                 if r.status_code != 200:
                     if not feats:
-                        return JSONResponse(status_code=502, content={"error": f"upstream {layer_key} HTTP {r.status_code}"})
+                        break  # try next source_url mirror
                     truncated = True
                     break
                 try:
@@ -878,18 +1197,30 @@ def siting_parcel_detail(lat: float, lon: float, radius_mi: float = 5.0):
         ("transmission",     "Nearest transmission line"),
         ("natgas_pipelines", "Nearest natural gas pipeline"),
         ("power_plants",     "Nearest power plant"),
+        ("substations",      "Nearest substation"),
+        ("fiber_lines",      "Nearest fiber optic cable"),
     ]
     out: dict = {"lat": lat, "lon": lon, "radius_mi": radius_mi, "results": []}
     for key, label in targets:
         cfg = LIVE_LAYER_REGISTRY.get(key)
         if not cfg:
             continue
-        url = _arcgis_query_url(cfg, bbox, page_size=2000, offset=0)
-        try:
-            r = _rq.get(url, timeout=20)
-            data = r.json() if r.status_code == 200 else {}
-        except Exception:
-            data = {}
+        # Internal (non-ArcGIS) layers \u2014 dispatch to their in-process handler
+        # and treat the returned FeatureCollection the same way as ArcGIS output.
+        if cfg.get("internal"):
+            if key == "fiber_lines":
+                data = _fiber_lines_fc(bbox, limit=2000, state=None)
+                if isinstance(data, JSONResponse):
+                    data = {}
+            else:
+                data = {}
+        else:
+            url = _arcgis_query_url(cfg, bbox, page_size=2000, offset=0)
+            try:
+                r = _rq.get(url, timeout=20)
+                data = r.json() if r.status_code == 200 else {}
+            except Exception:
+                data = {}
         feats = data.get("features", []) if isinstance(data, dict) else []
         best: float | None = None
         best_props: dict = {}
@@ -1045,5 +1376,88 @@ def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
                 result["sources"].append("FEMA NFHL")
     except Exception as e:
         result["flood_error"] = str(e)
+
+    # 4) Substation intersection — if this parcel contains (or is directly
+    # adjacent to) a known HIFLD substation, surface the upstream attributes
+    # so the popup can show owner / voltage / capacity / status without the
+    # user having to turn the substations layer on first.
+    try:
+        from urllib.parse import urlencode
+        sub_cfg = LIVE_LAYER_REGISTRY.get("substations") or {}
+        # Walk every configured source URL so flaky upstream hosts don't
+        # silently drop the enrichment.
+        sub_sources = sub_cfg.get("source_urls") or ([sub_cfg["url"]] if sub_cfg.get("url") else [])
+        # ~500m search radius; substations are point features so we buffer the
+        # click point and use intersects. 0.005 deg \u2248 555m at equator.
+        deg = 0.005
+        sub_bbox = f"{lon - deg},{lat - deg},{lon + deg},{lat + deg}"
+        sub_hit: dict | None = None
+        for src_url in sub_sources:
+            params = {
+                "where": "1=1",
+                "outFields": "*",
+                "f": "geojson",
+                "outSR": 4326,
+                "inSR": 4326,
+                "geometryType": "esriGeometryEnvelope",
+                "geometry": sub_bbox,
+                "spatialRel": "esriSpatialRelIntersects",
+                "returnGeometry": "true",
+                "resultRecordCount": 25,
+            }
+            url = src_url + "/query?" + urlencode(params)
+            try:
+                r = _resilient_get(url, timeout=15, retries=2)
+            except Exception:
+                continue
+            if r.status_code != 200:
+                continue
+            try:
+                data = r.json()
+            except Exception:
+                continue
+            feats = data.get("features") or []
+            if not feats:
+                continue
+            # Pick the closest substation by point distance.
+            from math import sqrt as _sqrt
+            best = None
+            best_d = None
+            for f in feats:
+                g = f.get("geometry") or {}
+                coords = g.get("coordinates") or []
+                if len(coords) < 2:
+                    continue
+                dx = coords[0] - lon
+                dy = coords[1] - lat
+                d = _sqrt(dx * dx + dy * dy)
+                if best_d is None or d < best_d:
+                    best_d = d
+                    best = f
+            if best is not None:
+                sub_hit = best
+                break
+        if sub_hit:
+            props = sub_hit.get("properties") or {}
+            # Present a subset of fields tuned for popup readability.
+            result["substation"] = {
+                "id": props.get("ID") or props.get("OBJECTID"),
+                "name": props.get("NAME"),
+                "owner": props.get("OWNER") or props.get("COMPANY"),
+                "operator": props.get("OPERATOR"),
+                "type": props.get("TYPE"),
+                "status": props.get("STATUS") or props.get("OP_STATUS"),
+                "max_voltage_kv": props.get("MAX_VOLT") or props.get("MAX_VOLTAGE") or props.get("VOLTAGE"),
+                "min_voltage_kv": props.get("MIN_VOLT") or props.get("MIN_VOLTAGE"),
+                "lines_in": props.get("LINES") or props.get("LINES_IN"),
+                "source": props.get("SOURCE"),
+                "source_date": props.get("SOURCEDATE"),
+                "county": props.get("COUNTY"),
+                "state": props.get("STATE"),
+                "all_fields": props,
+            }
+            result["sources"].append("HIFLD Substations")
+    except Exception as e:
+        result["substation_error"] = str(e)
 
     return result

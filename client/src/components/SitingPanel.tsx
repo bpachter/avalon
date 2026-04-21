@@ -78,6 +78,17 @@ const VOLTAGE_WIDTH_EXPR: maplibregl.DataDrivenPropertyValueSpecification<number
   765, 3.0,
 ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>
 
+const VOLTAGE_LEGEND_ITEMS: Array<{ label: string; color: string }> = [
+  { label: 'Less than 69 kV', color: '#d7e750' },
+  { label: '69 kV', color: '#5ddb39' },
+  { label: '115 kV', color: '#56d5df' },
+  { label: '138 kV', color: '#3f8ce6' },
+  { label: '161 kV', color: '#3549dd' },
+  { label: '230 kV', color: '#5e32d9' },
+  { label: '345 kV', color: '#8c2dc3' },
+  { label: '500+ kV', color: '#cc3bc8' },
+]
+
 function colorForScore(score: number, killed: boolean): string {
   if (killed) return '#3a1018'
   // 0..10 → red..amber..green
@@ -238,8 +249,15 @@ export default function SitingPanel() {
       setLayers(r.layers)
       setEnabledLayers(prev => {
         const next: Record<string, boolean> = {}
-        const defaultsOn = new Set(['transmission', 'transmission_duke', 'natgas_pipelines'])
-        for (const l of r.layers) next[l.key] = prev[l.key] ?? defaultsOn.has(l.key)
+        const defaultsOn = new Set(['transmission', 'natgas_pipelines'])
+        for (const l of r.layers) {
+          if (l.key === 'transmission_duke') {
+            // merged into transmission for a single combined toggle
+            next[l.key] = false
+          } else {
+            next[l.key] = prev[l.key] ?? defaultsOn.has(l.key)
+          }
+        }
         return next
       })
     }).catch(e => setError(String(e)))
@@ -443,10 +461,30 @@ export default function SitingPanel() {
     // Larger limit for line layers so transmission renders contiguously.
     // Parcel layers use their own configured max_records for performance.
     const limit = lyr.geom === 'line' ? 12000 : (lyr.key.endsWith('_parcels') ? 2000 : 6000)
-    const data = await fetchSitingProxyGeoJSON(key, bbox, limit, stateFilter)
-    if ('error' in data) {
-      setLayerStatus(s => ({ ...s, [key]: 'error' }))
-      return
+    let data: any
+    if (key === 'transmission') {
+      // Merge Duke-owned lines into the base transmission overlay so the UI has
+      // one toggle and one unified voltage legend.
+      const [baseData, dukeData] = await Promise.all([
+        fetchSitingProxyGeoJSON('transmission', bbox, limit, stateFilter),
+        fetchSitingProxyGeoJSON('transmission_duke', bbox, limit, stateFilter),
+      ])
+      const baseOk = !('error' in baseData)
+      const dukeOk = !('error' in dukeData)
+      if (!baseOk && !dukeOk) {
+        setLayerStatus(s => ({ ...s, [key]: 'error' }))
+        return
+      }
+      const mergedFeatures: any[] = []
+      if (baseOk && Array.isArray((baseData as any).features)) mergedFeatures.push(...(baseData as any).features)
+      if (dukeOk && Array.isArray((dukeData as any).features)) mergedFeatures.push(...(dukeData as any).features)
+      data = { type: 'FeatureCollection', features: mergedFeatures }
+    } else {
+      data = await fetchSitingProxyGeoJSON(key, bbox, limit, stateFilter)
+      if ('error' in data) {
+        setLayerStatus(s => ({ ...s, [key]: 'error' }))
+        return
+      }
     }
     const SRC = `ovl-${key}-src`
     const LYR = `ovl-${key}-lyr`
@@ -457,7 +495,7 @@ export default function SitingPanel() {
     } else {
       map.addSource(SRC, { type: 'geojson', data: data as any, generateId: true })
       if (lyr.geom === 'line') {
-        const isVoltage = lyr.style === 'voltage' || key === 'transmission' || key === 'transmission_duke'
+        const isVoltage = lyr.style === 'voltage' || key === 'transmission'
         map.addLayer({
           id: LYR, type: 'line', source: SRC,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -718,9 +756,17 @@ export default function SitingPanel() {
   const factorList = factorsCatalog?.factors ?? []
   const baseWeights = factorsCatalog?.weights[archetype] ?? {}
 
+  const visibleLayers = useMemo(
+    () => layers.filter((l) => l.key !== 'transmission_duke'),
+    [layers],
+  )
+
   const activeLegendLayers = useMemo(
-    () => layers.filter((l) => !!enabledLayers[l.key]),
-    [layers, enabledLayers],
+    () => visibleLayers.filter((l) => {
+      if (l.key === 'transmission') return !!enabledLayers.transmission || !!enabledLayers.transmission_duke
+      return !!enabledLayers[l.key]
+    }),
+    [visibleLayers, enabledLayers],
   )
 
   function setWeight(factor: string, val: number) {
@@ -789,6 +835,7 @@ export default function SitingPanel() {
           </div>
           {Object.entries(
             layers
+              .filter(l => l.key !== 'transmission_duke')
               // Only show a single parcel toggle for the active state.
               // Fallback to key-prefix matching so this still works even if
               // backend metadata is stale/missing `state`.
@@ -965,16 +1012,28 @@ export default function SitingPanel() {
           <div className="map-legend">
             <div className="map-legend-head">ACTIVE LAYERS</div>
             {activeLegendLayers.map((l) => {
-              const voltageStyle = l.key === 'transmission' || l.key === 'transmission_duke'
+              const voltageStyle = l.key === 'transmission'
               return (
-                <div className="map-legend-row" key={l.key}>
-                  {voltageStyle ? (
-                    <span className="map-legend-ramp" />
-                  ) : (
+                voltageStyle ? (
+                  <div className="map-legend-voltage" key={l.key}>
+                    <div className="map-legend-row">
+                      <span className="map-legend-swatch" style={{ background: '#5ea8ff' }} />
+                      <span className="map-legend-name">Transmission grid lines</span>
+                    </div>
+                    <div className="map-legend-voltage-head">VOLTAGE</div>
+                    {VOLTAGE_LEGEND_ITEMS.map((item) => (
+                      <div className="map-legend-voltage-row" key={item.label}>
+                        <span className="map-legend-voltage-swatch" style={{ background: item.color }} />
+                        <span className="map-legend-name">{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="map-legend-row" key={l.key}>
                     <span className="map-legend-swatch" style={{ background: l.color }} />
-                  )}
-                  <span className="map-legend-name">{l.name}</span>
-                </div>
+                    <span className="map-legend-name">{l.name}</span>
+                  </div>
+                )
               )
             })}
           </div>

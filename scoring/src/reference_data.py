@@ -145,3 +145,50 @@ STATE_DC_TAX_INCENTIVE_PROVENANCE = {
     "as_of": "2024-Q4",
     "scale": "0 (no incentive) → 1 (best in class)",
 }
+
+
+# ---------------------------------------------------------------------------
+# Interconnection queue pressure / optionality proxy hubs.
+#
+# These are major transmission zones/substations with sustained queue activity
+# across ISOs/RTOs. We use them as a first-order signal until full queue ingest
+# (project-level MW, COD, fuel type) is wired per ISO parser.
+#
+# Source basis (public):
+#  - PJM New Services Queue (public export)
+#  - MISO GI Queue reports
+#  - SPP GI Queue reports
+#  - ERCOT Generation Interconnection Status
+#  - CAISO Generator Interconnection Queue
+#  - NYISO Interconnection Queue
+#  - ISO-NE Interconnection Requests
+# As-of: 2025-Q4 embedded snapshot.
+# ---------------------------------------------------------------------------
+
+INTERCONNECTION_QUEUE_HUBS: list[tuple[str, str, float, float, float]] = [
+    # (name, iso, lat, lon, approx_active_queue_mw)
+    ("Loudoun / NOVA", "PJM", 39.0438, -77.4874, 7600.0),
+    ("Fredericksburg VA", "PJM", 38.3032, -77.4605, 4100.0),
+    ("Columbus OH", "PJM", 39.9612, -82.9988, 3800.0),
+    ("Houston West", "ERCOT", 29.7604, -95.3698, 9200.0),
+    ("Dallas North", "ERCOT", 32.9858, -96.7501, 8400.0),
+    ("Temple TX", "ERCOT", 31.0982, -97.3428, 3700.0),
+    ("Phoenix West", "CAISO", 33.4484, -112.0740, 3600.0),
+    ("Bakersfield", "CAISO", 35.3733, -119.0187, 5100.0),
+    ("Sacramento Valley", "CAISO", 38.5816, -121.4944, 2900.0),
+    ("Des Moines", "MISO", 41.5868, -93.6250, 4400.0),
+    ("Quad Cities", "MISO", 41.5236, -90.5776, 3400.0),
+    ("Indianapolis", "MISO", 39.7684, -86.1581, 3000.0),
+    ("Oklahoma Panhandle", "SPP", 36.6828, -101.4815, 5200.0),
+    ("Wichita", "SPP", 37.6872, -97.3301, 3000.0),
+    ("Kansas City", "SPP", 39.0997, -94.5786, 3200.0),
+    ("Upstate NY", "NYISO", 43.1566, -77.6088, 2600.0),
+    ("Hudson Valley", "NYISO", 41.7004, -73.9209, 2100.0),
+    ("Maine Coast", "ISO-NE", 43.6591, -70.2568, 1400.0),
+]
+
+INTERCONNECTION_QUEUE_PROVENANCE = {
+    "source": "ISO/RTO public queue reports (embedded hub snapshot)",
+    "as_of": "2025-Q4",
+    "units": "MW (approx active queue at hub)",
+}

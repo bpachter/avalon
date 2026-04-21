@@ -1,10 +1,10 @@
-"""power_transmission — distance to ≥230 kV transmission + substation MW headroom.
+"""power_transmission — transmission distance + substation headroom + queue congestion.
 
 Sources:
   - HIFLD Electric Power Transmission Lines (filter VOLTAGE >= 230)
   - HIFLD Electric Substations
   - FERC Form 715 (planning models) — TODO
-  - ISO/RTO interconnection queues — TODO
+    - ISO/RTO interconnection queues (live per-project ingest + cache)
 
 Sub-score (piecewise on distance to nearest ≥230 kV line):
    0 mi  -> 1.00
@@ -18,7 +18,7 @@ Kill criterion: no ≥230 kV line within 15 miles.
 from __future__ import annotations
 
 from ..geo import haversine_mi
-from ..ingest import hifld
+from ..ingest import hifld, iso_queues
 from ..normalize import piecewise
 from ._base import FactorResult, stub_result
 
@@ -89,6 +89,47 @@ def _score_substation_headroom(site) -> tuple[float, dict] | None:
     }
 
 
+def _score_queue_congestion(site) -> tuple[float, dict] | None:
+    """Live queue congestion signal from per-project ISO queue ingest.
+
+    We balance two effects:
+    - Optionality signal: nearby active queue MW indicates interconnection activity.
+    - Congestion signal: excessive local queue MW / withdrawals indicate friction.
+    """
+    metrics = iso_queues.congestion_metrics(
+        site.lat,
+        site.lon,
+        state=(site.extras.get("state") if hasattr(site, "extras") else None),
+    )
+    if metrics is None:
+        return None
+
+    nearest_raw = metrics.get("nearest_project_distance_mi")
+    nearest_mi = float(nearest_raw) if nearest_raw is not None else 120.0
+    active_100 = float(metrics.get("active_mw_100mi") or 0.0)
+    pending_100 = float(metrics.get("pending_mw_100mi") or 0.0)
+    withdrawn_share = float(metrics.get("withdrawn_share_100mi") or 0.0)
+
+    # Optionality improves when there is nearby active queue infrastructure.
+    near_score = piecewise(nearest_mi, [(0.0, 1.0), (25.0, 0.9), (75.0, 0.7), (150.0, 0.4), (300.0, 0.0)])
+    activity_score = piecewise(active_100, [(0.0, 0.1), (500.0, 0.35), (2000.0, 0.65), (6000.0, 0.9), (12000.0, 0.75)])
+
+    # Congestion penalty rises with pending-heavy queues and high withdrawal share.
+    pending_pressure = min(1.0, pending_100 / max(active_100 + 1.0, 1.0))
+    congestion_penalty = 0.6 * pending_pressure + 0.4 * withdrawn_share
+
+    queue_score = max(0.0, min(1.0, (0.6 * near_score + 0.4 * activity_score) * (1.0 - 0.45 * congestion_penalty)))
+
+    return queue_score, {
+        "queue_source": iso_queues.provenance().get("source"),
+        "queue_as_of": iso_queues.provenance().get("as_of"),
+        "queue_score": round(queue_score, 4),
+        "queue_pending_pressure": round(pending_pressure, 4),
+        "queue_congestion_penalty": round(congestion_penalty, 4),
+        **metrics,
+    }
+
+
 def score(site) -> FactorResult:
     idx = hifld.transmission_index()
     if idx is None or not idx.points:
@@ -99,6 +140,8 @@ def score(site) -> FactorResult:
 
     line_sub = piecewise(dist_mi, _DIST_ANCHORS)
     headroom = _score_substation_headroom(site)
+    queue_opt = _score_queue_congestion(site)
+
     if headroom is None:
         sub = line_sub
         headroom_prov = {
@@ -107,8 +150,21 @@ def score(site) -> FactorResult:
         }
     else:
         headroom_sub, headroom_prov = headroom
-        # Keep distance-to-line dominant until headroom becomes measured, not proxy.
-        sub = 0.8 * line_sub + 0.2 * headroom_sub
+        if queue_opt is None:
+            # Keep distance-to-line dominant until headroom becomes measured, not proxy.
+            sub = 0.8 * line_sub + 0.2 * headroom_sub
+        else:
+            queue_sub, _queue_prov = queue_opt
+            # Queue signal is additive but intentionally lower weight than distance.
+            sub = 0.7 * line_sub + 0.2 * headroom_sub + 0.1 * queue_sub
+
+    if queue_opt is None:
+        queue_prov = {
+            "queue_score": None,
+            "queue_note": "queue ingest unavailable",
+        }
+    else:
+        _queue_sub, queue_prov = queue_opt
 
     kill = dist_mi > 15.0
     return FactorResult(
@@ -121,5 +177,6 @@ def score(site) -> FactorResult:
             "line_distance_sub_score": round(line_sub, 4),
             "kill_threshold_mi": 15.0,
             **headroom_prov,
+            **queue_prov,
         },
     )

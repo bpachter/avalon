@@ -663,6 +663,51 @@ def siting_qa_natgas_coverage(state: str = "NC", limit: int = 12000):
     }
 
 
+def _queue_freshness_snapshot(state_code: str) -> dict:
+    """Return scoring queue-ingest cache freshness + quick congestion snapshot."""
+    score_mod, _ = _import_dcsite()
+    if score_mod is None:
+        return {"ok": False, "error": "scoring engine unavailable"}
+    try:
+        import importlib
+
+        iq = importlib.import_module("src.ingest.iso_queues")
+        cache = iq.cache_status()
+        prov = iq.provenance()
+        projects = iq.queue_projects()
+
+        iso_counts: dict[str, int] = {}
+        for p in projects:
+            iso = str(p.get("iso") or "UNKNOWN")
+            iso_counts[iso] = iso_counts.get(iso, 0) + 1
+
+        b = US_STATE_BBOX.get(state_code, US_STATE_BBOX["CONUS"])
+        center_lat = (b[1] + b[3]) / 2
+        center_lon = (b[0] + b[2]) / 2
+        metrics = iq.congestion_metrics(center_lat, center_lon, state=state_code)
+
+        return {
+            "ok": True,
+            "cache": cache,
+            "provenance": prov,
+            "projects": len(projects),
+            "geocoded_projects": sum(1 for p in projects if p.get("lat") is not None and p.get("lon") is not None),
+            "iso_counts": iso_counts,
+            "state_metrics": metrics,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/siting/qa/queue_freshness")
+def siting_qa_queue_freshness(state: str = "NC"):
+    st = state.upper().strip()
+    return {
+        "state": st,
+        "queue": _queue_freshness_snapshot(st),
+    }
+
+
 @app.get("/api/siting/qa/coverage")
 def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int = 1500):
     """Cross-layer data-quality snapshot for a state region.
@@ -735,6 +780,7 @@ def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int 
         "generated_ms_total": sum(r.get("elapsed_ms", 0) for r in report),
         "layers_total": len(report),
         "layers_with_data": live_count,
+        "queue": _queue_freshness_snapshot(st),
         "layers": report,
     }
 

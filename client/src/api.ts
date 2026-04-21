@@ -201,6 +201,16 @@ export interface CoverageReport {
   generated_ms_total: number
   layers_total: number
   layers_with_data: number
+  queue?: {
+    ok: boolean
+    cache?: { cached?: boolean; path?: string | null; projects?: number }
+    provenance?: { source?: string; as_of?: string; path?: string }
+    projects?: number
+    geocoded_projects?: number
+    iso_counts?: Record<string, number>
+    state_metrics?: Record<string, unknown> | null
+    error?: string
+  }
   layers: CoverageLayer[]
 }
 

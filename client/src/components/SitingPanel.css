@@ -325,6 +325,12 @@
 }
 .dq-summary b { color: var(--green); font-size: 14px; }
 .dq-list { list-style: none; padding: 0; margin: 0; }
+.dq-queue {
+  border-left: 3px solid var(--cyan);
+  padding: 5px 8px;
+  margin-bottom: 8px;
+  background: rgba(24, 184, 255, 0.06);
+}
 .dq-row {
   border-left: 3px solid var(--border);
   padding: 5px 8px;

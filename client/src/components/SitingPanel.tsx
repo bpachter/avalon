@@ -779,6 +779,26 @@ export default function SitingPanel() {
                 <span><b>{coverage.layers_with_data}</b>/{coverage.layers_total}</span>
                 <span>layers live · {coverage.generated_ms_total} ms total</span>
               </div>
+              {coverage.queue && (
+                <div className="dq-queue">
+                  <div className="dq-row-head">
+                    <span className="dq-name">Queue ingest</span>
+                    <span className={`dq-conf ${coverage.queue.ok && coverage.queue.cache?.cached ? 'ok' : ''}`}>
+                      {coverage.queue.ok && coverage.queue.cache?.cached ? 'live cache' : 'fallback'}
+                    </span>
+                  </div>
+                  <div className="dq-row-meta">
+                    <span>projects {coverage.queue.projects ?? 0}</span>
+                    <span>geocoded {coverage.queue.geocoded_projects ?? 0}</span>
+                    <span>as_of {coverage.queue.provenance?.as_of ?? 'embedded'}</span>
+                    {coverage.queue.state_metrics && (
+                      <span>
+                        state active MW {Number((coverage.queue.state_metrics['active_mw_100mi'] as number | undefined) ?? 0).toFixed(0)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
               <ul className="dq-list">
                 {coverage.layers.map((row) => {
                   const conf = row.confidence ?? (row.ok ? 'ok' : 'gap')

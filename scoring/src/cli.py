@@ -79,7 +79,7 @@ def cmd_ingest(factor: str | None = None, all_: bool = False, max_features: int 
         print("specify --factor <name> or --all", file=sys.stderr)
         return 2
 
-    from .ingest import hifld, eia
+    from .ingest import hifld, eia, iso_queues
 
     if all_:
         print("== HIFLD ==")
@@ -90,6 +90,11 @@ def cmd_ingest(factor: str | None = None, all_: bool = False, max_features: int 
             print(f"  retail_industrial             {eia.download_industrial_retail_price()}")
         except Exception as e:
             print(f"  retail_industrial             ERROR: {e}")
+        print("== ISO queues ==")
+        try:
+            print(f"  iso_queues                    {iso_queues.download_projects()}")
+        except Exception as e:
+            print(f"  iso_queues                    ERROR: {e}")
         return 0
 
     # Single-factor / single-source ingest dispatch
@@ -100,17 +105,21 @@ def cmd_ingest(factor: str | None = None, all_: bool = False, max_features: int 
     if factor == "eia_retail":
         print(f"eia_retail: {eia.download_industrial_retail_price()}")
         return 0
+    if factor == "iso_queues":
+        print(f"iso_queues: {iso_queues.download_projects()}")
+        return 0
     print(
         f"unknown ingest target: {factor!r}\n"
         f"valid HIFLD layers: {list(hifld.LAYERS)}\n"
-        f"valid EIA datasets: ['eia_retail']",
+        f"valid EIA datasets: ['eia_retail']\n"
+        f"valid queue datasets: ['iso_queues']",
         file=sys.stderr,
     )
     return 2
 
 
 def cmd_status() -> int:
-    from .ingest import hifld, eia
+    from .ingest import hifld, eia, iso_queues
     print("HIFLD layers:")
     for k, v in hifld.cache_status().items():
         flag = "OK " if v["cached"] else "-- "
@@ -119,6 +128,10 @@ def cmd_status() -> int:
     for k, v in eia.cache_status().items():
         flag = "OK " if v["cached"] else "-- "
         print(f"  {flag} {k:32}  {v['path'] or '(no cache)'}")
+    q = iso_queues.cache_status()
+    qflag = "OK " if q.get("cached") else "-- "
+    print("ISO queue datasets:")
+    print(f"  {qflag} {'iso_queues':32}  {q.get('path') or '(no cache)'}")
     return 0
 
 

@@ -38,6 +38,7 @@ export interface FactorResultDTO {
   weight: number
   weighted: number
   killed: boolean
+  stub?: boolean
   provenance: Record<string, unknown>
 }
 

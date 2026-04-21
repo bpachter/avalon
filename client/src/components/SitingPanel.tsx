@@ -224,6 +224,11 @@ export default function SitingPanel() {
     setCoverageLoading(false)
   }, [])
 
+  useEffect(() => {
+    if (!mapReady) return
+    refreshCoverage(activeState)
+  }, [activeState, mapReady, refreshCoverage])
+
   // ── init: catalog + layer list + sample sites ─────────────────────────
   const loadCatalog = useCallback(() => {
     setError(null)

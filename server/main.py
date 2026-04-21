@@ -204,23 +204,23 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": f"{_HIFLD2}/US_Electric_Power_Transmission_Lines/FeatureServer/0",
         "where": "1=1",
         "out_fields": "OBJECTID,VOLTAGE,VOLT_CLASS,OWNER,SUB_1,SUB_2,TYPE,STATUS",
-        "geom": "line", "color": "#ff3d7f", "style": "voltage", "min_zoom": 5,
-        "source": "HIFLD", "max_records": 12000,
+        "geom": "line", "color": "#ff3d7f", "style": "voltage", "min_zoom": 4,
+        "source": "HIFLD", "max_records": 50000, "page_size": 2000,
     },
     "transmission_duke": {
         "name": "Transmission — Duke-owned", "group": "Grid & infrastructure",
         "url": f"{_HIFLD2}/US_Electric_Power_Transmission_Lines/FeatureServer/0",
         "where": "OWNER LIKE '%DUKE%'",
         "out_fields": "OBJECTID,VOLTAGE,VOLT_CLASS,OWNER,SUB_1,SUB_2,TYPE,STATUS",
-        "geom": "line", "color": "#ff5a3c", "style": "voltage", "min_zoom": 5,
-        "source": "HIFLD", "max_records": 8000,
+        "geom": "line", "color": "#ff5a3c", "style": "voltage", "min_zoom": 4,
+        "source": "HIFLD", "max_records": 50000, "page_size": 2000,
     },
     "power_plants": {
         "name": "Power plants", "group": "Grid & infrastructure",
         "url": f"{_HIFLD2}/Power_Plants_in_the_US/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
         "geom": "point", "color": "#ff7a00", "min_zoom": 4,
-        "source": "HIFLD", "max_records": 6000,
+        "source": "HIFLD", "max_records": 50000, "page_size": 2000,
     },
     "power_plants_duke": {
         "name": "Power plants — Duke", "group": "Grid & infrastructure",
@@ -239,14 +239,14 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
     },
     "substations": {
         "name": "Electric substations", "group": "Grid & infrastructure",
-        "url": f"{_HIFLD2}/Electric_Substations_1/FeatureServer/0",
+        "url": "https://services5.arcgis.com/HDRa0B57OVrv2E1q/arcgis/rest/services/Electric_Substations/FeatureServer/0",
         "source_urls": [
-            f"{_HIFLD2}/Electric_Substations_1/FeatureServer/0",
-            "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Electric_Substations/FeatureServer/0",
+            "https://services5.arcgis.com/HDRa0B57OVrv2E1q/arcgis/rest/services/Electric_Substations/FeatureServer/0",
+            "https://services.arcgis.com/G4S1dGvn7PIgYd6Y/arcgis/rest/services/HIFLD_electric_power_substations/FeatureServer/0",
         ],
         "where": "1=1", "out_fields": "*",
-        "geom": "point", "color": "#ffe066", "min_zoom": 6,
-        "source": "HIFLD", "max_records": 6000,
+        "geom": "point", "color": "#ffe066", "min_zoom": 4,
+        "source": "HIFLD", "max_records": 50000, "page_size": 2000,
     },
     "natgas_pipelines": {
         "name": "Natural gas pipelines", "group": "Other infrastructure",
@@ -257,7 +257,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         ],
         "where": "1=1", "out_fields": "*",
         "geom": "line", "color": "#3aa0ff", "min_zoom": 4,
-        "source": "HIFLD", "max_records": 8000,
+        "source": "HIFLD", "max_records": 50000, "page_size": 2000,
     },
     "crude_oil_pipelines": {
         "name": "Crude oil pipelines", "group": "Other infrastructure",
@@ -299,20 +299,25 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
         "where": "1=1",
         "out_fields": "OBJECTID,FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE",
-        "geom": "polygon", "color": "#7ad0ff", "min_zoom": 9,
-        "source": "FEMA NFHL", "max_records": 4000, "page_size": 1000,
+        "geom": "polygon", "color": "#7ad0ff", "min_zoom": 8,
+        # FEMA's NFHL gateway 504s when asked for >1000 polygons in a single
+        # request. Keep page_size small and rely on pagination to assemble the
+        # viewport's polygons.
+        "source": "FEMA NFHL", "max_records": 50000, "page_size": 500,
     },
     "usfws_wetlands": {
         "name": "USFWS wetlands (NWI)", "group": "Hazards & environment",
-        "url": "https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands/MapServer/0",
+        "url": "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0",
         "source_urls": [
-            "https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands/MapServer/0",
-            "https://www.fws.gov/wetlandsmapservice/services/Wetlands/MapServer/0",
+            "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0",
+            "https://www.fws.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0",
         ],
         "where": "1=1",
-        "out_fields": "OBJECTID,WETLAND_TYPE,ACRES",
-        "geom": "polygon", "color": "#3ad6a0", "min_zoom": 11,
-        "source": "USFWS NWI", "max_records": 2000, "page_size": 500,
+        # MapServer joins two tables; use "*" so we don't have to hardcode
+        # table-prefixed field names like Wetlands.OBJECTID. Keeps query valid.
+        "out_fields": "*",
+        "geom": "polygon", "color": "#3ad6a0", "min_zoom": 9,
+        "source": "USFWS NWI", "max_records": 50000, "page_size": 1000,
     },
     "county_subdivisions": {
         "name": "County subdivisions", "group": "Boundaries",

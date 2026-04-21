@@ -50,21 +50,20 @@ const STYLE_SATELLITE: maplibregl.StyleSpecification = {
   ],
 }
 
-// Voltage → color ramp (kV). Used as a data-driven MapLibre expression for
-// the transmission lines layers.
+// Voltage → color ramp (kV). Discrete step expression so each kV bucket
+// matches its legend swatch exactly. Light yellow at the low end → orange in
+// the middle → deep purple/magenta at the highest voltages.
 const VOLTAGE_COLOR_EXPR: maplibregl.DataDrivenPropertyValueSpecification<string> = [
-  'interpolate',
-  ['linear'],
+  'step',
   ['to-number', ['get', 'VOLTAGE'], 0],
-  -10, '#5a6470',     // unknown / NULL coded as -1
-  0,   '#5a6470',
-  69,  '#ffeb3b',     // distribution
-  115, '#ffc107',
-  138, '#ff9800',
-  230, '#ff5722',
-  345, '#e91e63',
-  500, '#9c27b0',
-  765, '#3f51b5',
+  '#fff04a',  // < 69 kV (and unknown / NULL coded as -1 / 0)
+  69,  '#ffd000',  // 69 kV
+  115, '#ff9800',  // 115 kV
+  138, '#ff5722',  // 138 kV
+  161, '#ff3d3d',  // 161 kV
+  230, '#e91e63',  // 230 kV
+  345, '#c026d3',  // 345 kV
+  500, '#7b1fa2',  // 500+ kV
 ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>
 
 const VOLTAGE_WIDTH_EXPR: maplibregl.DataDrivenPropertyValueSpecification<number> = [
@@ -79,14 +78,14 @@ const VOLTAGE_WIDTH_EXPR: maplibregl.DataDrivenPropertyValueSpecification<number
 ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>
 
 const VOLTAGE_LEGEND_ITEMS: Array<{ label: string; color: string }> = [
-  { label: 'Less than 69 kV', color: '#d7e750' },
-  { label: '69 kV', color: '#5ddb39' },
-  { label: '115 kV', color: '#56d5df' },
-  { label: '138 kV', color: '#3f8ce6' },
-  { label: '161 kV', color: '#3549dd' },
-  { label: '230 kV', color: '#5e32d9' },
-  { label: '345 kV', color: '#8c2dc3' },
-  { label: '500+ kV', color: '#cc3bc8' },
+  { label: 'Less than 69 kV', color: '#fff04a' },
+  { label: '69 kV',           color: '#ffd000' },
+  { label: '115 kV',          color: '#ff9800' },
+  { label: '138 kV',          color: '#ff5722' },
+  { label: '161 kV',          color: '#ff3d3d' },
+  { label: '230 kV',          color: '#e91e63' },
+  { label: '345 kV',          color: '#c026d3' },
+  { label: '500+ kV',         color: '#7b1fa2' },
 ]
 
 function colorForScore(score: number, killed: boolean): string {
@@ -458,9 +457,10 @@ export default function SitingPanel() {
     ].includes(key)
       ? activeState
       : null
-    // Larger limit for line layers so transmission renders contiguously.
-    // Parcel layers use their own configured max_records for performance.
-    const limit = lyr.geom === 'line' ? 12000 : (lyr.key.endsWith('_parcels') ? 2000 : 6000)
+    // No artificial cap on visible features — backend max_records bounds the
+    // payload. We rely on state-region clipping in the proxy to keep payloads
+    // sane while still rendering everything in the visible viewport.
+    const limit = lyr.key.endsWith('_parcels') ? 2000 : 50000
     let data: any
     if (key === 'transmission') {
       // Merge Duke-owned lines into the base transmission overlay so the UI has
@@ -1014,21 +1014,27 @@ export default function SitingPanel() {
             {activeLegendLayers.map((l) => {
               const voltageStyle = l.key === 'transmission'
               return (
-                voltageStyle ? (
-                  <div className="map-legend-voltage" key={l.key}>
-                    <div className="map-legend-row">
-                      <span className="map-legend-swatch" style={{ background: '#5ea8ff' }} />
-                      <span className="map-legend-name">Transmission grid lines</span>
-                    </div>
-                    <div className="map-legend-voltage-head">VOLTAGE</div>
-                    {VOLTAGE_LEGEND_ITEMS.map((item) => (
-                      <div className="map-legend-voltage-row" key={item.label}>
-                        <span className="map-legend-voltage-swatch" style={{ background: item.color }} />
-                        <span className="map-legend-name">{item.label}</span>
+                  voltageStyle ? (
+                    <div className="map-legend-voltage" key={l.key}>
+                      <div className="map-legend-row">
+                        <span
+                          className="map-legend-swatch"
+                          style={{
+                            background:
+                              'linear-gradient(90deg, #fff04a, #ff9800, #e91e63, #7b1fa2)',
+                          }}
+                        />
+                        <span className="map-legend-name">Transmission grid lines</span>
                       </div>
-                    ))}
-                  </div>
-                ) : (
+                      <div className="map-legend-voltage-head">VOLTAGE</div>
+                      {VOLTAGE_LEGEND_ITEMS.map((item) => (
+                        <div className="map-legend-voltage-row" key={item.label}>
+                          <span className="map-legend-voltage-swatch" style={{ background: item.color }} />
+                          <span className="map-legend-name">{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
                   <div className="map-legend-row" key={l.key}>
                     <span className="map-legend-swatch" style={{ background: l.color }} />
                     <span className="map-legend-name">{l.name}</span>

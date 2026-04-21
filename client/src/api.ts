@@ -178,6 +178,47 @@ export async function fetchSitingMoratoriums(): Promise<{ counties: MoratoriumCo
   return fetchJson(`${BASE}/api/siting/moratoriums`, 'siting/moratoriums')
 }
 
+export interface CoverageLayer {
+  key: string
+  name: string
+  group: string
+  source: string
+  ok: boolean
+  returned?: number | null
+  limit?: number | null
+  truncated?: boolean
+  source_count?: number
+  source_breakdown?: Record<string, number>
+  elapsed_ms?: number
+  confidence?: 'gap' | 'saturated' | 'multi-source' | 'ok'
+  error?: string
+}
+
+export interface CoverageReport {
+  state: string
+  region_bbox: string
+  generated_ms_total: number
+  layers_total: number
+  layers_with_data: number
+  layers: CoverageLayer[]
+}
+
+export async function fetchSitingCoverage(state: string, layers?: string[], limit = 1500): Promise<CoverageReport | { error: string }> {
+  const params = new URLSearchParams({ state, limit: String(limit) })
+  if (layers && layers.length) params.set('layers', layers.join(','))
+  try {
+    const r = await fetch(`${BASE}/api/siting/qa/coverage?${params}`)
+    if (!r.ok) {
+      let j: { error?: string } = {}
+      try { j = await r.json() } catch { /* ignore */ }
+      return { error: j.error ?? `HTTP ${r.status}` }
+    }
+    return await parseJsonOrThrow<CoverageReport>(r, 'siting/qa/coverage')
+  } catch (e) {
+    return { error: String(e) }
+  }
+}
+
 export async function fetchParcelDetail(
   lat: number, lon: number, radius_mi = 5,
 ): Promise<ParcelDetail | { error: string }> {

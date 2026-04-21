@@ -266,6 +266,106 @@
 .map-toolbar button.active { background: var(--cyan-glow); color: #fff; }
 .bbox-readout { font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
 
+.map-legend {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  z-index: 5;
+  min-width: 230px;
+  max-width: 320px;
+  background: rgba(6, 8, 16, 0.86);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  backdrop-filter: blur(4px);
+}
+.map-legend-head {
+  color: var(--amber);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  margin-bottom: 8px;
+}
+.map-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: #d3daea;
+  margin-bottom: 5px;
+}
+.map-legend-row:last-child { margin-bottom: 0; }
+.map-legend-swatch {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.15);
+}
+.map-legend-ramp {
+  width: 30px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ffeb3b, #ff9800, #e91e63, #3f51b5);
+}
+.map-legend-name {
+  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Data Quality (provenance) panel */
+.dq-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0 8px;
+  font-size: 11px;
+  color: #b8c4dc;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 8px;
+}
+.dq-summary b { color: var(--green); font-size: 14px; }
+.dq-list { list-style: none; padding: 0; margin: 0; }
+.dq-row {
+  border-left: 3px solid var(--border);
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.018);
+}
+.dq-row.dq-ok           { border-left-color: var(--green); }
+.dq-row.dq-multi-source { border-left-color: var(--cyan); }
+.dq-row.dq-saturated    { border-left-color: var(--amber); }
+.dq-row.dq-gap          { border-left-color: var(--red, #ff4d6d); opacity: 0.85; }
+.dq-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #e1e7f5;
+}
+.dq-conf {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.dq-row.dq-ok .dq-conf           { color: var(--green); }
+.dq-row.dq-multi-source .dq-conf { color: var(--cyan); }
+.dq-row.dq-gap .dq-conf          { color: var(--red, #ff4d6d); }
+.dq-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10px;
+  color: #8a94aa;
+  margin-top: 2px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.dq-err {
+  color: var(--red, #ff4d6d);
+  font-size: 11px;
+  padding: 4px 0;
+}
+
 /* State selector */
 .state-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .state-select {

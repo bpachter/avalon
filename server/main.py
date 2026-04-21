@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import traceback
+import hashlib
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -236,9 +237,24 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "point", "color": "#ffd000", "min_zoom": 9,
         "source": "HIFLD", "max_records": 4000,
     },
+    "substations": {
+        "name": "Electric substations", "group": "Grid & infrastructure",
+        "url": f"{_HIFLD2}/Electric_Substations_1/FeatureServer/0",
+        "source_urls": [
+            f"{_HIFLD2}/Electric_Substations_1/FeatureServer/0",
+            "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Electric_Substations/FeatureServer/0",
+        ],
+        "where": "1=1", "out_fields": "*",
+        "geom": "point", "color": "#ffe066", "min_zoom": 6,
+        "source": "HIFLD", "max_records": 6000,
+    },
     "natgas_pipelines": {
         "name": "Natural gas pipelines", "group": "Other infrastructure",
         "url": f"{_HIFLD2}/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0",
+        "source_urls": [
+            f"{_HIFLD2}/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0",
+            "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Natural_Gas_Interstate_and_Intrastate_Pipelines/FeatureServer/0",
+        ],
         "where": "1=1", "out_fields": "*",
         "geom": "line", "color": "#3aa0ff", "min_zoom": 4,
         "source": "HIFLD", "max_records": 8000,
@@ -278,6 +294,26 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "point", "color": "#00ffae", "min_zoom": 8,
         "source": "NC OneMap", "max_records": 4000,
     },
+    "fema_flood_zones": {
+        "name": "FEMA flood hazard zones", "group": "Hazards & environment",
+        "url": "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
+        "where": "1=1",
+        "out_fields": "OBJECTID,FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE",
+        "geom": "polygon", "color": "#7ad0ff", "min_zoom": 9,
+        "source": "FEMA NFHL", "max_records": 4000, "page_size": 1000,
+    },
+    "usfws_wetlands": {
+        "name": "USFWS wetlands (NWI)", "group": "Hazards & environment",
+        "url": "https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands/MapServer/0",
+        "source_urls": [
+            "https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands/MapServer/0",
+            "https://www.fws.gov/wetlandsmapservice/services/Wetlands/MapServer/0",
+        ],
+        "where": "1=1",
+        "out_fields": "OBJECTID,WETLAND_TYPE,ACRES",
+        "geom": "polygon", "color": "#3ad6a0", "min_zoom": 11,
+        "source": "USFWS NWI", "max_records": 2000, "page_size": 500,
+    },
     "county_subdivisions": {
         "name": "County subdivisions", "group": "Boundaries",
         "url": f"{_HIFLD2}/County_Subdivisions_v1/FeatureServer/0",
@@ -309,6 +345,21 @@ US_STATE_BBOX: dict[str, tuple[float, float, float, float]] = {
 }
 
 DUKE_STATES = ["NC", "SC", "FL", "IN", "OH", "KY"]
+
+# State adjacency used to bound heavy line-layer queries to selected + border states.
+# This trims payload volume while preserving edge effects near state borders.
+STATE_BORDER_MAP: dict[str, list[str]] = {
+    "NC": ["VA", "SC", "GA", "TN"],
+    "SC": ["NC", "GA"],
+    "FL": ["GA", "AL"],
+    "IN": ["IL", "MI", "OH", "KY"],
+    "OH": ["MI", "PA", "WV", "KY", "IN"],
+    "KY": ["IL", "IN", "OH", "WV", "VA", "TN", "MO"],
+    "GA": ["FL", "AL", "TN", "NC", "SC"],
+    "VA": ["NC", "TN", "KY", "WV", "MD"],
+    "TN": ["KY", "VA", "NC", "GA", "AL", "MS", "AR", "MO"],
+    "TX": ["NM", "OK", "AR", "LA"],
+}
 
 _STATE_FULL_NAME: dict[str, str] = {
     "NC": "North Carolina", "SC": "South Carolina", "FL": "Florida",
@@ -355,6 +406,95 @@ def _arcgis_query_url(cfg: dict, bbox: tuple, *, page_size: int, offset: int, ex
     return cfg["url"] + "/query?" + urlencode(params)
 
 
+def _arcgis_query_url_for_source(
+    cfg: dict,
+    source_url: str,
+    bbox: tuple,
+    *,
+    page_size: int,
+    offset: int,
+    extra_where: str | None = None,
+) -> str:
+    from urllib.parse import urlencode
+    xmin, ymin, xmax, ymax = bbox
+    where = cfg["where"]
+    if extra_where:
+        where = f"({where}) AND ({extra_where})" if where != "1=1" else extra_where
+    params = {
+        "where": where, "outFields": cfg["out_fields"], "f": "geojson",
+        "outSR": 4326, "inSR": 4326, "geometryType": "esriGeometryEnvelope",
+        "spatialRel": "esriSpatialRelIntersects",
+        "geometry": f"{xmin},{ymin},{xmax},{ymax}",
+        "resultRecordCount": page_size, "resultOffset": offset, "returnGeometry": "true",
+    }
+    return source_url + "/query?" + urlencode(params)
+
+
+def _feature_sig(f: dict) -> str:
+    """Stable signature for de-duplicating features across multiple ArcGIS feeds."""
+    g = f.get("geometry") or {}
+    p = f.get("properties") or {}
+    seed = {
+        "gt": g.get("type"),
+        # hashing full geometry is cheap enough for our payload sizes
+        "gc": g.get("coordinates"),
+        "id": p.get("OBJECTID") or p.get("OBJECTID_1") or p.get("ID"),
+        "nm": p.get("Pipename") or p.get("PIPELINE_NAME") or p.get("NAME"),
+        "op": p.get("Operator") or p.get("OPERATOR") or p.get("OWNER"),
+    }
+    return hashlib.sha1(str(seed).encode("utf-8")).hexdigest()
+
+
+def _norm_natgas_props(props: dict) -> dict:
+    """Normalize common natural-gas fields across source variants."""
+    out = dict(props)
+    out["name"] = (
+        props.get("Pipename") or props.get("PIPELINE_NAME") or props.get("PIPE_NAME")
+        or props.get("NAME")
+    )
+    out["operator"] = (
+        props.get("Operator") or props.get("OPERATOR") or props.get("OWNER")
+        or props.get("COMPANY")
+    )
+    out["status_norm"] = (
+        props.get("STATUS") or props.get("OPER_STAT") or props.get("OP_STATUS")
+    )
+    out["diameter_in"] = (
+        props.get("Diameter") or props.get("DIAMETER") or props.get("DIAM_IN")
+    )
+    return out
+
+
+def _bbox_union(boxes: list[tuple[float, float, float, float]]) -> tuple[float, float, float, float] | None:
+    if not boxes:
+        return None
+    xmin = min(b[0] for b in boxes)
+    ymin = min(b[1] for b in boxes)
+    xmax = max(b[2] for b in boxes)
+    ymax = max(b[3] for b in boxes)
+    return (xmin, ymin, xmax, ymax)
+
+
+def _bbox_intersection(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> tuple[float, float, float, float] | None:
+    xmin = max(a[0], b[0])
+    ymin = max(a[1], b[1])
+    xmax = min(a[2], b[2])
+    ymax = min(a[3], b[3])
+    if xmin >= xmax or ymin >= ymax:
+        return None
+    return (xmin, ymin, xmax, ymax)
+
+
+def _state_plus_neighbors_bbox(state_code: str) -> tuple[float, float, float, float] | None:
+    st = state_code.upper().strip()
+    states = [st, *STATE_BORDER_MAP.get(st, [])]
+    boxes = [US_STATE_BBOX[s] for s in states if s in US_STATE_BBOX]
+    return _bbox_union(boxes)
+
+
 @app.get("/api/siting/live_layers")
 def siting_live_layers():
     return {"layers": [
@@ -379,6 +519,31 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
         return JSONResponse(status_code=400, content={"error": f"bad bbox: {e}"})
 
     extra_where: str | None = None
+    # Constrain high-volume infra layers to selected state + border states.
+    if state and layer_key in {
+        "transmission", "transmission_duke", "natgas_pipelines",
+        "crude_oil_pipelines", "petroleum_pipelines", "hgl_pipelines",
+        "substations", "fema_flood_zones", "usfws_wetlands",
+    }:
+        state_region = _state_plus_neighbors_bbox(state)
+        if state_region:
+            clipped = _bbox_intersection(bbox_t, state_region)
+            if clipped is None:
+                return {
+                    "type": "FeatureCollection",
+                    "features": [],
+                    "_meta": {
+                        "layer": layer_key,
+                        "state": state,
+                        "returned": 0,
+                        "limit": 0,
+                        "bbox": bbox,
+                        "clipped_to_state_region": True,
+                        "live": True,
+                    },
+                }
+            bbox_t = clipped
+
     if state:
         st = state.upper()
         if layer_key in {"power_plants", "power_plants_duke"}:
@@ -392,42 +557,73 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
 
     cap = int(cfg.get("max_records", 4000))
     target = min(limit, cap)
-    page_size = 2000
+    page_size = int(cfg.get("page_size", 2000))
+    source_urls: list[str] = list(cfg.get("source_urls") or [cfg["url"]])
 
     feats: list[dict] = []
+    seen: set[str] = set()
+    source_breakdown: dict[str, int] = {}
     truncated = False
     try:
         import requests as _rq
-        offset = 0
-        while len(feats) < target:
-            url = _arcgis_query_url(cfg, bbox_t, page_size=min(page_size, target - len(feats)),
-                                    offset=offset, extra_where=extra_where)
-            r = _rq.get(url, timeout=30)
-            if r.status_code != 200:
-                if not feats:
-                    return JSONResponse(status_code=502, content={"error": f"upstream {layer_key} HTTP {r.status_code}"})
-                truncated = True; break
-            try:
-                data = r.json()
-            except Exception:
-                if not feats:
-                    return JSONResponse(status_code=502, content={"error": f"upstream {layer_key}: non-JSON"})
-                truncated = True; break
-            if isinstance(data, dict) and "error" in data and "features" not in data:
-                if not feats:
-                    return JSONResponse(status_code=502, content={"error": f"upstream: {data.get('error')}"})
-                truncated = True; break
-            page = data.get("features", []) if isinstance(data, dict) else []
-            if not page:
-                break
-            feats.extend(page)
-            props = data.get("properties") or {}
-            exceeded = bool(props.get("exceededTransferLimit") or data.get("exceededTransferLimit"))
-            if not exceeded and len(page) < page_size:
-                break
+        for source_url in source_urls:
+            offset = 0
+            source_key = source_url.split("/arcgis/")[0]
+            source_breakdown.setdefault(source_key, 0)
+            while len(feats) < target:
+                url = _arcgis_query_url_for_source(
+                    cfg,
+                    source_url,
+                    bbox_t,
+                    page_size=min(page_size, target - len(feats)),
+                    offset=offset,
+                    extra_where=extra_where,
+                )
+                r = _rq.get(url, timeout=30)
+                if r.status_code != 200:
+                    if not feats:
+                        return JSONResponse(status_code=502, content={"error": f"upstream {layer_key} HTTP {r.status_code}"})
+                    truncated = True
+                    break
+                try:
+                    data = r.json()
+                except Exception:
+                    if not feats:
+                        return JSONResponse(status_code=502, content={"error": f"upstream {layer_key}: non-JSON"})
+                    truncated = True
+                    break
+                if isinstance(data, dict) and "error" in data and "features" not in data:
+                    if not feats:
+                        return JSONResponse(status_code=502, content={"error": f"upstream: {data.get('error')}"})
+                    truncated = True
+                    break
+                page = data.get("features", []) if isinstance(data, dict) else []
+                if not page:
+                    break
+
+                for f in page:
+                    sig = _feature_sig(f)
+                    if sig in seen:
+                        continue
+                    seen.add(sig)
+                    if layer_key == "natgas_pipelines":
+                        f["properties"] = _norm_natgas_props(f.get("properties") or {})
+                    feats.append(f)
+                    source_breakdown[source_key] += 1
+                    if len(feats) >= target:
+                        break
+
+                props = data.get("properties") or {}
+                exceeded = bool(props.get("exceededTransferLimit") or data.get("exceededTransferLimit"))
+                if not exceeded and len(page) < page_size:
+                    break
+                if len(feats) >= target:
+                    truncated = True
+                    break
+                offset += len(page)
+
             if len(feats) >= target:
-                truncated = True; break
-            offset += len(page)
+                break
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"proxy {layer_key} failed: {e}"})
 
@@ -438,9 +634,108 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             "layer": layer_key, "name": cfg["name"], "source": cfg["source"],
             "group": cfg["group"], "geom": cfg["geom"], "color": cfg["color"],
             "style": cfg.get("style"), "min_zoom": cfg["min_zoom"],
-            "returned": len(feats), "limit": target, "bbox": bbox,
+            "returned": len(feats), "limit": target,
+            "bbox": bbox, "bbox_used": f"{bbox_t[0]},{bbox_t[1]},{bbox_t[2]},{bbox_t[3]}",
             "state": state, "truncated": truncated, "live": True,
+            "source_count": len(source_urls), "source_breakdown": source_breakdown,
         },
+    }
+
+
+@app.get("/api/siting/qa/natgas_coverage")
+def siting_qa_natgas_coverage(state: str = "NC", limit: int = 12000):
+    """Quick QA snapshot of natural-gas pipeline source coverage in state region."""
+    st = state.upper().strip()
+    if st not in US_STATE_BBOX:
+        return JSONResponse(status_code=400, content={"error": f"unknown state {state!r}"})
+    region = _state_plus_neighbors_bbox(st)
+    if region is None:
+        return JSONResponse(status_code=400, content={"error": f"no bbox for state {state!r}"})
+    bbox = f"{region[0]},{region[1]},{region[2]},{region[3]}"
+    out = siting_proxy("natgas_pipelines", bbox=bbox, limit=limit, state=st)
+    if isinstance(out, JSONResponse):
+        return out
+    return {
+        "state": st,
+        "region_bbox": bbox,
+        "returned": len(out.get("features", [])),
+        "meta": out.get("_meta", {}),
+    }
+
+
+@app.get("/api/siting/qa/coverage")
+def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int = 1500):
+    """Cross-layer data-quality snapshot for a state region.
+
+    Returns per-layer feature counts, source breakdown, fetch latency, and
+    coverage confidence flags. Powers the frontend Data Quality panel — this
+    is the provenance surface that distinguishes us from a black-box aggregator.
+    """
+    import time as _time
+    st = state.upper().strip()
+    if st not in US_STATE_BBOX:
+        return JSONResponse(status_code=400, content={"error": f"unknown state {state!r}"})
+    region = _state_plus_neighbors_bbox(st) or US_STATE_BBOX[st]
+    bbox = f"{region[0]},{region[1]},{region[2]},{region[3]}"
+
+    default_keys = [
+        "transmission", "substations", "power_plants",
+        "natgas_pipelines", "fema_flood_zones", "usfws_wetlands",
+    ]
+    if layers:
+        keys = [k.strip() for k in layers.split(",") if k.strip() in LIVE_LAYER_REGISTRY]
+    else:
+        keys = [k for k in default_keys if k in LIVE_LAYER_REGISTRY]
+
+    report: list[dict] = []
+    for key in keys:
+        cfg = LIVE_LAYER_REGISTRY[key]
+        t0 = _time.perf_counter()
+        out = siting_proxy(key, bbox=bbox, limit=limit, state=st)
+        elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+        if isinstance(out, JSONResponse):
+            report.append({
+                "key": key, "name": cfg["name"], "group": cfg["group"],
+                "source": cfg["source"], "ok": False,
+                "error": f"HTTP {out.status_code}",
+                "elapsed_ms": elapsed_ms,
+            })
+            continue
+        meta = out.get("_meta") or {}
+        returned = len(out.get("features", []))
+        cap = int(cfg.get("max_records", 4000))
+        # Confidence heuristics: multi-source > single, near-cap = saturated, 0 = gap
+        if returned == 0:
+            confidence = "gap"
+        elif returned >= cap * 0.95 or meta.get("truncated"):
+            confidence = "saturated"
+        elif int(meta.get("source_count", 1)) > 1:
+            confidence = "multi-source"
+        else:
+            confidence = "ok"
+        report.append({
+            "key": key,
+            "name": cfg["name"],
+            "group": cfg["group"],
+            "source": cfg["source"],
+            "ok": True,
+            "returned": returned,
+            "limit": meta.get("limit"),
+            "truncated": bool(meta.get("truncated")),
+            "source_count": int(meta.get("source_count", 1)),
+            "source_breakdown": meta.get("source_breakdown") or {},
+            "elapsed_ms": elapsed_ms,
+            "confidence": confidence,
+        })
+
+    live_count = sum(1 for r in report if r.get("ok") and (r.get("returned") or 0) > 0)
+    return {
+        "state": st,
+        "region_bbox": bbox,
+        "generated_ms_total": sum(r.get("elapsed_ms", 0) for r in report),
+        "layers_total": len(report),
+        "layers_with_data": live_count,
+        "layers": report,
     }
 
 

@@ -9,6 +9,7 @@ import {
   fetchSitingProxyGeoJSON,
   fetchSitingStates,
   fetchSitingMoratoriums,
+  fetchSitingCoverage,
   fetchParcelDetail,
   fetchParcelAttrs,
   scoreSites,
@@ -20,6 +21,7 @@ import {
   type MoratoriumCounty,
   type ParcelDetail,
   type ParcelAttrs,
+  type CoverageReport,
 } from '../api'
 import './SitingPanel.css'
 
@@ -204,6 +206,23 @@ export default function SitingPanel() {
   } | null>(null)
 
   const [stubCoverage, setStubCoverage] = useState<Record<string, number>>({})
+
+  const [coverage, setCoverage] = useState<CoverageReport | null>(null)
+  const [coverageLoading, setCoverageLoading] = useState(false)
+  const [coverageErr, setCoverageErr] = useState<string | null>(null)
+
+  const refreshCoverage = useCallback(async (state: string) => {
+    setCoverageLoading(true)
+    setCoverageErr(null)
+    const res = await fetchSitingCoverage(state)
+    if ('error' in res) {
+      setCoverageErr(res.error)
+      setCoverage(null)
+    } else {
+      setCoverage(res)
+    }
+    setCoverageLoading(false)
+  }, [])
 
   // ── init: catalog + layer list + sample sites ─────────────────────────
   const loadCatalog = useCallback(() => {
@@ -406,8 +425,11 @@ export default function SitingPanel() {
       return
     }
     setLayerStatus(s => ({ ...s, [key]: 'loading' }))
-    // Send the active state filter only to layers backed by HIFLD power data
-    const stateFilter = ['transmission', 'transmission_duke', 'power_plants', 'power_plants_duke'].includes(key)
+    // Send active state for heavy infra overlays so API can bound to selected+border states.
+    const stateFilter = [
+      'transmission', 'transmission_duke', 'power_plants', 'power_plants_duke',
+      'natgas_pipelines', 'crude_oil_pipelines', 'petroleum_pipelines', 'hgl_pipelines',
+    ].includes(key)
       ? activeState
       : null
     // Larger limit for line layers so transmission renders contiguously
@@ -622,6 +644,11 @@ export default function SitingPanel() {
   const factorList = factorsCatalog?.factors ?? []
   const baseWeights = factorsCatalog?.weights[archetype] ?? {}
 
+  const activeLegendLayers = useMemo(
+    () => layers.filter((l) => !!enabledLayers[l.key]),
+    [layers, enabledLayers],
+  )
+
   function setWeight(factor: string, val: number) {
     setWeightOverrides(w => ({ ...w, [factor]: val }))
   }
@@ -728,6 +755,52 @@ export default function SitingPanel() {
 
         <section className="siting-block">
           <div className="siting-block-head">
+            <span>DATA QUALITY · {activeState}</span>
+            <button
+              className="link-btn"
+              onClick={() => refreshCoverage(activeState)}
+              disabled={coverageLoading}
+            >{coverageLoading ? '…' : 'refresh'}</button>
+          </div>
+          {coverageErr && <div className="dq-err">{coverageErr}</div>}
+          {!coverage && !coverageErr && !coverageLoading && (
+            <div className="ingest-hint">
+              Click <em>refresh</em> to probe live source coverage for the selected state region.
+            </div>
+          )}
+          {coverage && (
+            <>
+              <div className="dq-summary">
+                <span><b>{coverage.layers_with_data}</b>/{coverage.layers_total}</span>
+                <span>layers live · {coverage.generated_ms_total} ms total</span>
+              </div>
+              <ul className="dq-list">
+                {coverage.layers.map((row) => {
+                  const conf = row.confidence ?? (row.ok ? 'ok' : 'gap')
+                  return (
+                    <li key={row.key} className={`dq-row dq-${conf}`}>
+                      <div className="dq-row-head">
+                        <span className="dq-name">{row.name}</span>
+                        <span className="dq-conf">{conf}</span>
+                      </div>
+                      <div className="dq-row-meta">
+                        <span>{row.source}</span>
+                        <span>{row.ok ? `${row.returned ?? 0} feats` : (row.error ?? 'error')}</span>
+                        <span>{row.elapsed_ms ?? 0}ms</span>
+                        {row.source_count && row.source_count > 1 && (
+                          <span title="Multi-source merge">×{row.source_count}</span>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
+          )}
+        </section>
+
+        <section className="siting-block">
+          <div className="siting-block-head">
             <span>WEIGHTS · {archetype}</span>
             <button className="link-btn" onClick={resetWeights}>reset</button>
           </div>
@@ -789,6 +862,24 @@ export default function SitingPanel() {
             {bbox && `${bbox[1].toFixed(2)}°N ${bbox[0].toFixed(2)}°E → ${bbox[3].toFixed(2)}°N ${bbox[2].toFixed(2)}°E`}
           </span>
         </div>
+        {activeLegendLayers.length > 0 && (
+          <div className="map-legend">
+            <div className="map-legend-head">ACTIVE LAYERS</div>
+            {activeLegendLayers.map((l) => {
+              const voltageStyle = l.key === 'transmission' || l.key === 'transmission_duke'
+              return (
+                <div className="map-legend-row" key={l.key}>
+                  {voltageStyle ? (
+                    <span className="map-legend-ramp" />
+                  ) : (
+                    <span className="map-legend-swatch" style={{ background: l.color }} />
+                  )}
+                  <span className="map-legend-name">{l.name}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
         {parcelPopup && (
           <div className="parcel-popup">
             <div className="parcel-popup-head">

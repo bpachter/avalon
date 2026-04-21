@@ -162,7 +162,7 @@ export default function SitingPanel() {
   // overlay is toggled off (otherwise toggling repeatedly leaks N listeners
   // and a single click would fire N popups).
   const overlayHandlersRef = useRef<Map<string, Array<{
-    type: 'click' | 'mouseenter' | 'mouseleave'
+    type: 'click' | 'mouseenter' | 'mouseleave' | 'mousemove'
     layerId: string
     fn: (e: any) => void
   }>>>(new Map())
@@ -401,6 +401,7 @@ export default function SitingPanel() {
     const SRC = `ovl-${key}-src`
     const LYR = `ovl-${key}-lyr`
     const LYR_FILL = `ovl-${key}-fill`
+    const LYR_HOVER = `ovl-${key}-hover`
     const LYR_MORATORIUM = `ovl-${key}-moratorium`
     // Remove tracked event listeners first (must come before removeLayer)
     const handlers = overlayHandlersRef.current.get(key)
@@ -411,6 +412,7 @@ export default function SitingPanel() {
       overlayHandlersRef.current.delete(key)
     }
     if (map.getLayer(LYR_MORATORIUM)) map.removeLayer(LYR_MORATORIUM)
+    if (map.getLayer(LYR_HOVER)) map.removeLayer(LYR_HOVER)
     if (map.getLayer(LYR)) map.removeLayer(LYR)
     if (map.getLayer(LYR_FILL)) map.removeLayer(LYR_FILL)
     if (map.getSource(SRC)) map.removeSource(SRC)
@@ -451,7 +453,7 @@ export default function SitingPanel() {
     if (map.getSource(SRC)) {
       ;(map.getSource(SRC) as maplibregl.GeoJSONSource).setData(data as any)
     } else {
-      map.addSource(SRC, { type: 'geojson', data: data as any })
+      map.addSource(SRC, { type: 'geojson', data: data as any, generateId: true })
       if (lyr.geom === 'line') {
         const isVoltage = lyr.style === 'voltage' || key === 'transmission' || key === 'transmission_duke'
         map.addLayer({
@@ -500,8 +502,54 @@ export default function SitingPanel() {
           id: LYR, type: 'line', source: SRC,
           paint: { 'line-color': lyr.color, 'line-width': 0.9, 'line-opacity': 0.85 },
         }, 'sites-halo')
-        // Click → parcel popup with proximity stats + public-data enrichment
-        if (key === 'nc_parcels') {
+        // Parcel layers: hover-highlight + click → popup (Paces-style).
+        // Pattern matches the per-state parcel keys (nc_parcels, sc_parcels, …).
+        if (key.endsWith('_parcels')) {
+          // Add a transparent hit/highlight fill so hover lights up the
+          // hovered polygon while the outline stays for non-hovered ones.
+          const LYR_HOVER = `ovl-${key}-hover`
+          map.addLayer({
+            id: LYR_HOVER, type: 'fill', source: SRC,
+            paint: {
+              'fill-color': '#ffffff',
+              'fill-opacity': [
+                'case',
+                ['boolean', ['feature-state', 'hover'], false], 0.18,
+                0,
+              ],
+            },
+          }, 'sites-halo')
+          // Thicken the outline of the hovered polygon for a clear edge.
+          map.setPaintProperty(LYR, 'line-width', [
+            'case',
+            ['boolean', ['feature-state', 'hover'], false], 2.4,
+            0.9,
+          ])
+          map.setPaintProperty(LYR, 'line-color', [
+            'case',
+            ['boolean', ['feature-state', 'hover'], false], '#ffffff',
+            lyr.color,
+          ])
+
+          let hoverId: string | number | undefined
+          const clearHover = () => {
+            if (hoverId !== undefined) {
+              try { map.setFeatureState({ source: SRC, id: hoverId }, { hover: false }) } catch { /* ignore */ }
+              hoverId = undefined
+            }
+          }
+          const onMove = (e: any) => {
+            const f = e.features?.[0]
+            if (!f) return
+            const id = f.id ?? (f.properties && (f.properties.OBJECTID ?? f.properties.objectid))
+            if (id === undefined || id === hoverId) return
+            clearHover()
+            hoverId = id as string | number
+            try { map.setFeatureState({ source: SRC, id: hoverId }, { hover: true }) } catch { /* ignore */ }
+          }
+          const onLeave = () => { clearHover(); map.getCanvas().style.cursor = '' }
+          const onEnter = () => { map.getCanvas().style.cursor = 'pointer' }
+
           const onClick = (e: any) => {
             const f = e.features?.[0]
             if (!f) return
@@ -516,7 +564,7 @@ export default function SitingPanel() {
               if ('error' in d) return
               setParcelPopup(p => p && { ...p, detail: d })
             })
-            fetchParcelAttrs(e.lngLat.lat, e.lngLat.lng).then(a => {
+            fetchParcelAttrs(e.lngLat.lat, e.lngLat.lng, activeState).then(a => {
               if ('error' in a) {
                 setParcelPopup(p => p && { ...p, loading: false })
                 return
@@ -530,15 +578,17 @@ export default function SitingPanel() {
               })
             })
           }
-          const onEnter = () => { map.getCanvas().style.cursor = 'pointer' }
-          const onLeave = () => { map.getCanvas().style.cursor = '' }
-          map.on('click', LYR, onClick)
-          map.on('mouseenter', LYR, onEnter)
-          map.on('mouseleave', LYR, onLeave)
+          // Bind to the hit fill so hover/click work on the parcel interior,
+          // not just the 1px outline.
+          map.on('mousemove', LYR_HOVER, onMove)
+          map.on('mouseenter', LYR_HOVER, onEnter)
+          map.on('mouseleave', LYR_HOVER, onLeave)
+          map.on('click', LYR_HOVER, onClick)
           overlayHandlersRef.current.set(key, [
-            { type: 'click', layerId: LYR, fn: onClick },
-            { type: 'mouseenter', layerId: LYR, fn: onEnter },
-            { type: 'mouseleave', layerId: LYR, fn: onLeave },
+            { type: 'mouseenter', layerId: LYR_HOVER, fn: onEnter },
+            { type: 'mouseleave', layerId: LYR_HOVER, fn: onLeave },
+            { type: 'mousemove',  layerId: LYR_HOVER, fn: onMove  },
+            { type: 'click',      layerId: LYR_HOVER, fn: onClick },
           ])
         }
       }
@@ -578,10 +628,27 @@ export default function SitingPanel() {
       [[s.bbox[0], s.bbox[1]], [s.bbox[2], s.bbox[3]]] as LngLatBoundsLike,
       { padding: 60, duration: 800 },
     )
+    // Drop any parcel layer from a different state — only the active state's
+    // parcel overlay should be loaded at any given time.
+    const activeParcelKey = `${activeState.toLowerCase()}_parcels`
+    setEnabledLayers(prev => {
+      const next = { ...prev }
+      let changed = false
+      for (const k of Object.keys(prev)) {
+        if (k.endsWith('_parcels') && k !== activeParcelKey && prev[k]) {
+          removeOverlay(k)
+          next[k] = false
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
     // Force enabled overlays to re-fetch with new state filter
     setTimeout(() => {
       for (const [key, on] of Object.entries(enabledLayers)) {
-        if (on) reloadOverlay(key)
+        if (on && !(key.endsWith('_parcels') && key !== activeParcelKey)) {
+          reloadOverlay(key)
+        }
       }
     }, 900)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -719,10 +786,15 @@ export default function SitingPanel() {
             <span className="siting-block-meta">z{zoom.toFixed(1)} · bbox</span>
           </div>
           {Object.entries(
-            layers.reduce<Record<string, LiveLayer[]>>((acc, l) => {
-              (acc[l.group] ||= []).push(l)
-              return acc
-            }, {}),
+            layers
+              // Only show the parcel layer for the currently selected state.
+              // Each state has its own backend layer key (nc_parcels, sc_parcels, …)
+              // so we filter the others out to keep the UI clean.
+              .filter(l => !l.key.endsWith('_parcels') || (l.state ?? '').toUpperCase() === activeState)
+              .reduce<Record<string, LiveLayer[]>>((acc, l) => {
+                (acc[l.group] ||= []).push(l)
+                return acc
+              }, {}),
           ).map(([group, items]) => (
             <div key={group} className="layer-group">
               <div className="layer-group-head">{group}</div>

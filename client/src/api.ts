@@ -70,6 +70,7 @@ export interface LiveLayer {
   style?: string | null
   min_zoom: number
   source: string
+  state?: string | null
 }
 
 export interface StateOption {
@@ -248,9 +249,10 @@ export async function fetchParcelDetail(
 }
 
 export async function fetchParcelAttrs(
-  lat: number, lon: number,
+  lat: number, lon: number, state?: string,
 ): Promise<ParcelAttrs | { error: string }> {
   const params = new URLSearchParams({ lat: String(lat), lon: String(lon) })
+  if (state) params.set('state', state)
   try {
     const r = await fetch(`${BASE}/api/siting/parcel_attrs?${params}`)
     if (!r.ok) {

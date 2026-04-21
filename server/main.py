@@ -327,7 +327,64 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
         "source": "NC OneMap", "max_records": 4000,
+        "state": "NC",
     },
+    "sc_parcels": {
+        "name": "Parcel outlines (SC – York)", "group": "Boundaries",
+        # York County, SC — only verified open SC statewide-style parcel feed
+        # we could reach without a token. Future: add additional county feeds.
+        "url": "https://services1.arcgis.com/2AGLxyiJoNiVHKwq/arcgis/rest/services/Parcels/FeatureServer/0",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
+        "source": "York County SC GIS", "max_records": 4000,
+        "state": "SC",
+    },
+    "fl_parcels": {
+        "name": "Parcel outlines (FL)", "group": "Boundaries",
+        "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
+        "source": "FDOR Cadastral (FL DOR)", "max_records": 4000,
+        "state": "FL",
+    },
+    "in_parcels": {
+        "name": "Parcel outlines (IN)", "group": "Boundaries",
+        "url": "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
+        "source": "IndianaMap (IGIO)", "max_records": 4000,
+        "state": "IN",
+    },
+    "oh_parcels": {
+        "name": "Parcel outlines (OH)", "group": "Boundaries",
+        "url": "https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
+        "source": "OGRIP Ohio Statewide Parcels", "max_records": 4000,
+        "state": "OH",
+    },
+    "ky_parcels": {
+        "name": "Parcel outlines (KY – Jefferson)", "group": "Boundaries",
+        # Jefferson County (Louisville) PVA — only verified open KY statewide-
+        # style parcel feed we could reach without a token. Future: add more.
+        "url": "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/New_AllParcels/FeatureServer/0",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
+        "source": "Jefferson County KY PVA", "max_records": 4000,
+        "state": "KY",
+    },
+}
+
+# State → parcel layer key. Used by frontend to swap the active parcel
+# overlay when the state selector changes, and by parcel_attrs to look up
+# the correct FeatureServer for point-in-polygon queries.
+STATE_PARCEL_LAYER: dict[str, str] = {
+    "NC": "nc_parcels",
+    "SC": "sc_parcels",
+    "FL": "fl_parcels",
+    "IN": "in_parcels",
+    "OH": "oh_parcels",
+    "KY": "ky_parcels",
 }
 
 US_STATE_BBOX: dict[str, tuple[float, float, float, float]] = {
@@ -500,7 +557,7 @@ def siting_live_layers():
     return {"layers": [
         {"key": k, "name": c["name"], "group": c["group"], "geom": c["geom"],
          "color": c["color"], "style": c.get("style"), "min_zoom": c["min_zoom"],
-         "source": c["source"]}
+         "source": c["source"], "state": c.get("state")}
         for k, c in LIVE_LAYER_REGISTRY.items()
     ]}
 
@@ -880,10 +937,10 @@ _FEMA_NFHL = (
 
 
 @app.get("/api/siting/parcel_attrs")
-def siting_parcel_attrs(lat: float, lon: float):
-    """Return the NC parcel record at (lat,lon) plus public-data enrichment.
+def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
+    """Return the parcel record at (lat,lon) plus public-data enrichment.
 
-    - NC OneMap parcel attributes (owner, acreage, values, address, zoning hints)
+    - State-aware parcel attribute lookup (NC, SC-York, FL, IN, OH, KY-Jefferson)
     - US Census Bureau: county / FIPS / tract / block
     - FEMA NFHL: 100-yr floodplain zone at the point
 
@@ -894,8 +951,10 @@ def siting_parcel_attrs(lat: float, lon: float):
 
     result: dict = {"lat": lat, "lon": lon, "sources": []}
 
-    # 1) NC parcel attributes — point-in-polygon query against FeatureServer/1
-    parcel_cfg = LIVE_LAYER_REGISTRY.get("nc_parcels")
+    # 1) Parcel attributes — pick the right layer for the active state, or
+    # fall back to NC for backward compatibility.
+    parcel_key = STATE_PARCEL_LAYER.get((state or "").upper().strip(), "nc_parcels")
+    parcel_cfg = LIVE_LAYER_REGISTRY.get(parcel_key)
     if parcel_cfg:
         from urllib.parse import urlencode
         params = {
@@ -918,7 +977,7 @@ def siting_parcel_attrs(lat: float, lon: float):
                 feats = data.get("features") or []
                 if feats:
                     result["parcel"] = feats[0].get("properties") or {}
-                    result["sources"].append("NC OneMap parcels")
+                    result["sources"].append(parcel_cfg.get("source", parcel_key))
         except Exception as e:
             result["parcel_error"] = str(e)
 

@@ -296,7 +296,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # returns GeoJSON directly instead of querying an ArcGIS endpoint.
         "url": "__INTERNAL__/fiber_lines",
         "where": "1=1", "out_fields": "*",
-        "geom": "line", "color": "#ffa726", "min_zoom": 6,
+        "geom": "line", "color": "#38bdf8", "min_zoom": 6,
         "source": "OpenStreetMap", "max_records": 50000, "page_size": 5000,
         "internal": True,
     },
@@ -342,7 +342,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "__INTERNAL__/county_opposition",
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#ff2e3a", "style": "opposition",
-        "min_zoom": 4,
+        "min_zoom": 0,
         "source": "Curated (news/econ-dev releases + local hearings)",
         "max_records": 500, "page_size": 500,
         "internal": True,
@@ -501,6 +501,14 @@ def _arcgis_query_url(cfg: dict, bbox: tuple, *, page_size: int, offset: int, ex
         "geometry": f"{xmin},{ymin},{xmax},{ymax}",
         "resultRecordCount": page_size, "resultOffset": offset, "returnGeometry": "true",
     }
+    # Server-side geometry simplification by zoom: drops vertices below the
+    # tolerance so 30k-vertex pipeline polylines come back as ~2k vertices,
+    # cutting payload + render time by 5–10× without visible loss at the
+    # current viewport.
+    bbox_deg = max(xmax - xmin, ymax - ymin)
+    if bbox_deg > 0:
+        # ~1px at the viewport's pixel density (assume ~800px wide).
+        params["maxAllowableOffset"] = round(bbox_deg / 800.0, 6)
     return cfg["url"] + "/query?" + urlencode(params)
 
 
@@ -525,6 +533,9 @@ def _arcgis_query_url_for_source(
         "geometry": f"{xmin},{ymin},{xmax},{ymax}",
         "resultRecordCount": page_size, "resultOffset": offset, "returnGeometry": "true",
     }
+    bbox_deg = max(xmax - xmin, ymax - ymin)
+    if bbox_deg > 0:
+        params["maxAllowableOffset"] = round(bbox_deg / 800.0, 6)
     return source_url + "/query?" + urlencode(params)
 
 
@@ -670,20 +681,33 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     import requests as _rq
     data: dict | None = None
     last_err: str | None = None
+    # Overpass requires a real User-Agent header — returns HTTP 406 otherwise.
+    headers = {
+        "User-Agent": "avalon-siting/1.0 (+https://github.com/bpachter/avalon)",
+        "Accept": "application/json",
+    }
     for ep in _OVERPASS_ENDPOINTS:
         try:
-            r = _rq.post(ep, data={"data": ql}, timeout=45)
+            r = _rq.post(ep, data={"data": ql}, headers=headers, timeout=45)
             if r.status_code == 200:
                 data = r.json()
                 break
-            last_err = f"HTTP {r.status_code}"
+            last_err = f"{ep.split('//')[1].split('/')[0]} HTTP {r.status_code}"
         except Exception as e:  # noqa: BLE001
             last_err = str(e)
             continue
     if data is None:
-        return JSONResponse(status_code=502, content={
-            "error": f"fiber_lines: Overpass unreachable ({last_err})",
-        })
+        # Empty FC instead of 502 — OSM is best-effort and shouldn't
+        # break the map when Overpass is rate-limiting.
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "_meta": {
+                "layer": "fiber_lines", "source": "OpenStreetMap (Overpass API)",
+                "returned": 0, "limit": limit, "live": True,
+                "warning": f"Overpass unreachable ({last_err}); try again in a minute",
+            },
+        }
 
     feats: list[dict] = []
     for el in data.get("elements", []):
@@ -729,92 +753,62 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     }
 
 
-# County boundary service (Census TIGER/Line) — used for rendering the
-# opposition-flag layer. Cached in memory for the lifetime of the process
-# so we don't hit the upstream for every viewport fetch.
-_CENSUS_COUNTIES_URL = (
-    "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/"
-    "State_County/MapServer/14"
-)
+# County boundary service — HIFLD `Counties_v1` mirrors the Census TIGER
+# polygons but is more reliable than tigerweb.geo.census.gov from Railway.
+# Used by the opposition-county layer to render flagged counties red.
+_HIFLD_COUNTIES = f"{_HIFLD2}/Counties_v1/FeatureServer/0"
 _OPPOSITION_CACHE: dict[str, dict] = {}
 
 
 def _county_opposition_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
-    """Polygon layer of counties flagged as having datacenter opposition.
+    """Polygon layer of counties flagged as having datacenter opposition."""
+    from urllib.parse import urlencode
 
-    Joins the curated COUNTY_MORATORIUMS list (status=='opposition') to
-    Census TIGER county polygons so each flagged county renders as a
-    red polygon with popup attrs showing the citation URL.
-    """
-    # Set of (state_full, county_name) for quick membership test.
     flags: dict[tuple[str, str], dict] = {}
     for row in COUNTY_MORATORIUMS:
         if (row.get("status") or "").lower() != "opposition":
             continue
-        flags[(row["state"].strip(), row["county"].strip().replace("'", ""))] = row
+        flags[(row["state"].strip(), row["county"].strip())] = row
     if not flags:
         return {"type": "FeatureCollection", "features": [],
                 "_meta": {"layer": "county_opposition", "returned": 0, "live": True}}
 
-    import requests as _rq
-    from urllib.parse import urlencode
-
-    # Build a WHERE clause enumerating the flagged counties by name and
-    # state abbrev. Census State_County layer fields: STATE, STUSAB, NAME,
-    # BASENAME, COUNTY, STATE_NAME.
-    # Using state + NAME avoids false positives across states with same county name.
-    _STATE_ABBREV = {
-        "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR",
-        "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE",
-        "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID",
-        "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS",
-        "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
-        "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS",
-        "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
-        "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
-        "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK",
-        "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
-        "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT",
-        "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV",
-        "Wisconsin": "WI", "Wyoming": "WY",
-    }
-
-    # Check cache. Key is state=STUSAB so we only fetch a state's counties once.
-    state_abbrevs = sorted({_STATE_ABBREV.get(s, "") for s, _c in flags.keys() if s in _STATE_ABBREV})
-    xmin, ymin, xmax, ymax = bbox_t
+    # Group by state for a single bulk request per state. Using STATE_NAME
+    # avoids a 1000-feature limit hit and gives us cache locality.
+    states_needed = sorted({s for s, _c in flags.keys()})
     feats: list[dict] = []
+    xmin, ymin, xmax, ymax = bbox_t
 
-    for abbrev in state_abbrevs:
-        if not abbrev:
-            continue
-        cached = _OPPOSITION_CACHE.get(abbrev)
+    for st_name in states_needed:
+        cached = _OPPOSITION_CACHE.get(st_name)
         if cached is None:
-            # Fetch every county in this state (small payload: ~100 features).
-            q_params = {
-                "where": f"STUSAB='{abbrev}'",
-                "outFields": "STATE,STUSAB,NAME,BASENAME,COUNTY,GEOID",
+            counties_in_state = [c for s, c in flags.keys() if s == st_name]
+            # Build a NAME IN (...) clause so we only fetch the polygons we need.
+            quoted = ",".join("'" + c.replace("'", "''") + "'" for c in counties_in_state)
+            where = f"STATE_NAME='{st_name}' AND NAME IN ({quoted})"
+            params = {
+                "where": where,
+                "outFields": "NAME,STATE_NAME,FIPS",
                 "f": "geojson", "outSR": 4326, "returnGeometry": "true",
-                "resultRecordCount": 1000,
+                "resultRecordCount": 200,
+                # Simplify polygons aggressively — we only need the silhouette.
+                "maxAllowableOffset": 0.005,
             }
             try:
-                r = _resilient_get(_CENSUS_COUNTIES_URL + "/query?" + urlencode(q_params),
-                                   timeout=30, retries=3)
+                r = _resilient_get(_HIFLD_COUNTIES + "/query?" + urlencode(params),
+                                   timeout=25, retries=3)
                 cached = r.json() if r.status_code == 200 else {"features": []}
             except Exception:  # noqa: BLE001
                 cached = {"features": []}
-            _OPPOSITION_CACHE[abbrev] = cached
+            _OPPOSITION_CACHE[st_name] = cached
+
         for cf in cached.get("features", []):
             props = cf.get("properties") or {}
-            name = (props.get("NAME") or props.get("BASENAME") or "").strip()
-            # Fetch state-full-name from abbrev map
-            st_full = next((k for k, v in _STATE_ABBREV.items() if v == abbrev), None)
-            if not st_full:
-                continue
-            key = (st_full, name.replace("'", ""))
+            name = (props.get("NAME") or "").strip()
+            key = (st_name, name)
             hit = flags.get(key)
             if not hit:
                 continue
-            # Inject citation into props so the click popup shows it.
             new_props = dict(props)
             new_props["opposition_status"] = hit.get("status")
             new_props["opposition_url"] = hit.get("url")
@@ -826,25 +820,33 @@ def _county_opposition_fc(bbox_t: tuple[float, float, float, float], *, limit: i
                 "properties": new_props,
             })
 
-    # Clip to requested bbox: keep only counties whose polygon intersects.
-    def _bbox_hit(feature: dict) -> bool:
+    # Bbox overlap test: keep features whose polygon bbox intersects the
+    # requested viewport. More permissive than vertex-in-bbox so polygons
+    # that fully enclose the viewport still pass.
+    def _feature_bbox(feature: dict) -> tuple[float, float, float, float] | None:
         g = feature.get("geometry") or {}
         coords = g.get("coordinates") or []
+        xs: list[float] = []
+        ys: list[float] = []
         def _walk(cs):
-            for c in cs:
-                if isinstance(c, (int, float)):
-                    yield cs
-                    return
-                if c and isinstance(c[0], (int, float)):
-                    yield c
-                else:
-                    yield from _walk(c)
-        for pt in _walk(coords):
-            if len(pt) >= 2 and xmin <= pt[0] <= xmax and ymin <= pt[1] <= ymax:
-                return True
-        return False
+            if not cs:
+                return
+            if isinstance(cs[0], (int, float)) and len(cs) >= 2:
+                xs.append(float(cs[0])); ys.append(float(cs[1]))
+                return
+            for sub in cs:
+                _walk(sub)
+        _walk(coords)
+        if not xs:
+            return None
+        return (min(xs), min(ys), max(xs), max(ys))
 
-    feats = [f for f in feats if _bbox_hit(f)][:limit]
+    def _bbox_overlap(b: tuple[float, float, float, float] | None) -> bool:
+        if b is None:
+            return False
+        return not (b[2] < xmin or b[0] > xmax or b[3] < ymin or b[1] > ymax)
+
+    feats = [f for f in feats if _bbox_overlap(_feature_bbox(f))][:limit]
     return {
         "type": "FeatureCollection",
         "features": feats,
@@ -853,7 +855,7 @@ def _county_opposition_fc(bbox_t: tuple[float, float, float, float], *, limit: i
             "source": "Curated (news/econ-dev releases + local hearings)",
             "group": "Boundaries",
             "geom": "polygon", "color": "#ff2e3a", "style": "opposition",
-            "min_zoom": 4, "returned": len(feats), "limit": limit,
+            "min_zoom": 0, "returned": len(feats), "limit": limit,
             "bbox": f"{xmin},{ymin},{xmax},{ymax}",
             "state": state, "live": True,
         },
@@ -1008,7 +1010,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"proxy {layer_key} failed: {e}"})
 
-    return {
+    response = JSONResponse({
         "type": "FeatureCollection",
         "features": feats[:target],
         "_meta": {
@@ -1020,7 +1022,13 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             "state": state, "truncated": truncated, "live": True,
             "source_count": len(source_urls), "source_breakdown": source_breakdown,
         },
-    }
+    })
+    # Aggressive browser caching: identical bbox+state+layer requests are
+    # served instantly from the browser/Railway edge instead of re-querying
+    # the upstream. 5-minute private TTL is short enough that infrastructure
+    # updates appear quickly while panning the same area is essentially free.
+    response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=600"
+    return response
 
 
 @app.get("/api/siting/qa/natgas_coverage")

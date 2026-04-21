@@ -28,26 +28,105 @@ import './SitingPanel.css'
 // Free MapLibre styles — no API key required
 const STYLE_DARK =
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+const STYLE_VOYAGER =
+  'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
+const STYLE_POSITRON =
+  'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+
+function _rasterStyle(
+  id: string,
+  tileTemplates: string[],
+  attribution: string,
+  maxzoom = 19,
+): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    glyphs: 'https://fonts.cartocdn.com/gl/{fontstack}/{range}.pbf',
+    sources: {
+      [id]: {
+        type: 'raster',
+        tiles: tileTemplates,
+        tileSize: 256,
+        maxzoom,
+        attribution,
+      },
+    },
+    layers: [{ id, type: 'raster', source: id }],
+  }
+}
 
 // USGS National Map satellite imagery — free, government-hosted, no API key required.
 // Replaces ESRI arcgisonline.com which ERR_CONNECTION_RESETs from GitHub Pages.
-const STYLE_SATELLITE: maplibregl.StyleSpecification = {
+const STYLE_SATELLITE: maplibregl.StyleSpecification = _rasterStyle(
+  'satellite',
+  ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],
+  'Tiles courtesy of the U.S. Geological Survey',
+  16,
+)
+
+// Hybrid satellite + roads/labels (ESRI World Imagery + ESRI Reference overlay).
+const STYLE_HYBRID: maplibregl.StyleSpecification = {
   version: 8,
   glyphs: 'https://fonts.cartocdn.com/gl/{fontstack}/{range}.pbf',
   sources: {
-    satellite: {
+    'esri-imagery': {
       type: 'raster',
       tiles: [
-        'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
-      maxzoom: 16,
-      attribution: 'Tiles courtesy of the U.S. Geological Survey',
+      maxzoom: 19,
+      attribution: 'Esri, Maxar, Earthstar Geographics',
+    },
+    'esri-reference': {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: 'Esri',
     },
   },
   layers: [
-    { id: 'satellite', type: 'raster', source: 'satellite' },
+    { id: 'esri-imagery-lyr', type: 'raster', source: 'esri-imagery' },
+    { id: 'esri-reference-lyr', type: 'raster', source: 'esri-reference' },
   ],
+}
+
+// USGS National Map topographic.
+const STYLE_TOPO: maplibregl.StyleSpecification = _rasterStyle(
+  'topo',
+  ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}'],
+  'Tiles courtesy of the U.S. Geological Survey',
+  16,
+)
+
+// OpenStreetMap raster (OSM standard tiles).
+const STYLE_OSM: maplibregl.StyleSpecification = _rasterStyle(
+  'osm',
+  [
+    'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  ],
+  '© OpenStreetMap contributors',
+  19,
+)
+
+type BasemapKey = 'dark' | 'voyager' | 'positron' | 'satellite' | 'hybrid' | 'topo' | 'osm'
+const BASEMAPS: { key: BasemapKey; label: string; style: string | maplibregl.StyleSpecification }[] = [
+  { key: 'dark',      label: 'Dark',                style: STYLE_DARK },
+  { key: 'voyager',   label: 'Voyager (streets)',   style: STYLE_VOYAGER },
+  { key: 'positron',  label: 'Light',               style: STYLE_POSITRON },
+  { key: 'satellite', label: 'Satellite (USGS)',    style: STYLE_SATELLITE },
+  { key: 'hybrid',    label: 'Satellite + roads',   style: STYLE_HYBRID },
+  { key: 'topo',      label: 'Topographic (USGS)',  style: STYLE_TOPO },
+  { key: 'osm',       label: 'OpenStreetMap',       style: STYLE_OSM },
+]
+function styleFor(key: BasemapKey): string | maplibregl.StyleSpecification {
+  return BASEMAPS.find(b => b.key === key)?.style ?? STYLE_DARK
 }
 
 // Voltage → color ramp (kV). Discrete step expression so each kV bucket
@@ -188,7 +267,7 @@ export default function SitingPanel() {
   // ── new: state selector, satellite toggle, moratoriums, parcel popup ──
   const [stateOptions, setStateOptions] = useState<StateOption[]>([])
   const [activeState, setActiveState] = useState<string>('NC')
-  const [basemap, setBasemap] = useState<'dark' | 'satellite'>('satellite')
+  const [basemap, setBasemap] = useState<BasemapKey>('hybrid')
   const [moratoriums, setMoratoriums] = useState<MoratoriumCounty[]>([])
   const moratoriumKeys = useMemo(() => {
     // Build {STATE_NAME|NAME → status} keys for fast lookup in MapLibre filter
@@ -309,7 +388,7 @@ export default function SitingPanel() {
     if (!mapDivRef.current || mapRef.current) return
     const map = new maplibregl.Map({
       container: mapDivRef.current,
-      style: basemap === 'satellite' ? STYLE_SATELLITE as any : STYLE_DARK,
+      style: styleFor(basemap) as any,
       // Center on North Carolina (initial scope per user)
       center: [-79.2, 35.5],
       zoom: 6.2,
@@ -494,6 +573,10 @@ export default function SitingPanel() {
       ;(map.getSource(SRC) as maplibregl.GeoJSONSource).setData(data as any)
     } else {
       map.addSource(SRC, { type: 'geojson', data: data as any, generateId: true })
+      // Only insert below the sites halo if it already exists \u2014 overlays may
+      // load before the sites layer if scoring data is still in flight, and
+      // an unknown beforeId throws "Cannot add layer X before non-existing layer Y".
+      const beforeId = map.getLayer('sites-halo') ? 'sites-halo' : undefined
       if (lyr.geom === 'line') {
         const isVoltage = lyr.style === 'voltage' || key === 'transmission'
         map.addLayer({
@@ -504,7 +587,7 @@ export default function SitingPanel() {
             'line-width': isVoltage ? VOLTAGE_WIDTH_EXPR : 1.2,
             'line-opacity': 0.92,
           },
-        }, 'sites-halo')
+        }, beforeId)
       } else if (lyr.geom === 'point') {
         map.addLayer({
           id: LYR, type: 'circle', source: SRC,
@@ -515,13 +598,13 @@ export default function SitingPanel() {
             'circle-stroke-width': 0.6,
             'circle-opacity': 0.95,
           },
-        }, 'sites-halo')
+        }, beforeId)
       } else {
         // polygon
         map.addLayer({
           id: LYR_FILL, type: 'fill', source: SRC,
           paint: { 'fill-color': lyr.color, 'fill-opacity': 0.10 },
-        }, 'sites-halo')
+        }, beforeId)
         // Light-red highlight for counties with documented opposition
         if (key === 'county_subdivisions' && moratoriumKeys.length) {
           const filterMatches: any[] = ['any']
@@ -536,12 +619,12 @@ export default function SitingPanel() {
             id: LYR_MORATORIUM, type: 'fill', source: SRC,
             filter: filterMatches as any,
             paint: { 'fill-color': '#ff6b6b', 'fill-opacity': 0.32 },
-          }, 'sites-halo')
+          }, beforeId)
         }
         map.addLayer({
           id: LYR, type: 'line', source: SRC,
           paint: { 'line-color': lyr.color, 'line-width': 0.9, 'line-opacity': 0.85 },
-        }, 'sites-halo')
+        }, beforeId)
         // Parcel layers: hover-highlight + click → popup (Paces-style).
         // Pattern matches the per-state parcel keys (nc_parcels, sc_parcels, …).
         if (key.endsWith('_parcels')) {
@@ -558,7 +641,7 @@ export default function SitingPanel() {
                 0,
               ],
             },
-          }, 'sites-halo')
+          }, beforeId)
           // Thicken the outline of the hovered polygon for a clear edge.
           map.setPaintProperty(LYR, 'line-width', [
             'case',
@@ -698,7 +781,7 @@ export default function SitingPanel() {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
-    const target = basemap === 'satellite' ? STYLE_SATELLITE : STYLE_DARK
+    const target = styleFor(basemap)
     map.setStyle(target as any)
     map.once('styledata', () => {
       // The site source/layers and overlays were dropped with the old style.
@@ -1000,10 +1083,16 @@ export default function SitingPanel() {
       <div className="siting-mapwrap">
         <div ref={mapDivRef} className="siting-map" />
         <div className="map-toolbar">
-          <button
-            className={basemap === 'satellite' ? 'active' : ''}
-            onClick={() => setBasemap(b => b === 'dark' ? 'satellite' : 'dark')}
-          >{basemap === 'satellite' ? 'DARK' : 'SAT'}</button>
+          <select
+            className="basemap-select"
+            value={basemap}
+            onChange={(e) => setBasemap(e.target.value as BasemapKey)}
+            title="Basemap"
+          >
+            {BASEMAPS.map(b => (
+              <option key={b.key} value={b.key}>{b.label}</option>
+            ))}
+          </select>
           <span className="bbox-readout">
             {bbox && `${bbox[1].toFixed(2)}°N ${bbox[0].toFixed(2)}°E → ${bbox[3].toFixed(2)}°N ${bbox[2].toFixed(2)}°E`}
           </span>

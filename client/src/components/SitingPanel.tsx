@@ -211,6 +211,16 @@ export default function SitingPanel() {
   const [coverageLoading, setCoverageLoading] = useState(false)
   const [coverageErr, setCoverageErr] = useState<string | null>(null)
 
+  const activeParcelLayerKey = useMemo(() => {
+    const target = `${activeState.toLowerCase()}_parcels`
+    const byKey = layers.find((l) => l.key === target)
+    if (byKey) return byKey.key
+    const byState = layers.find(
+      (l) => l.key.endsWith('_parcels') && (l.state ?? '').toUpperCase() === activeState,
+    )
+    return byState?.key ?? null
+  }, [layers, activeState])
+
   const refreshCoverage = useCallback(async (state: string) => {
     setCoverageLoading(true)
     setCoverageErr(null)
@@ -721,16 +731,6 @@ export default function SitingPanel() {
     () => layers.filter((l) => !!enabledLayers[l.key]),
     [layers, enabledLayers],
   )
-
-  const activeParcelLayerKey = useMemo(() => {
-    const target = `${activeState.toLowerCase()}_parcels`
-    const byKey = layers.find((l) => l.key === target)
-    if (byKey) return byKey.key
-    const byState = layers.find(
-      (l) => l.key.endsWith('_parcels') && (l.state ?? '').toUpperCase() === activeState,
-    )
-    return byState?.key ?? null
-  }, [layers, activeState])
 
   function setWeight(factor: string, val: number) {
     setWeightOverrides(w => ({ ...w, [factor]: val }))

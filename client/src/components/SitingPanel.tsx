@@ -630,7 +630,7 @@ export default function SitingPanel() {
     )
     // Drop any parcel layer from a different state — only the active state's
     // parcel overlay should be loaded at any given time.
-    const activeParcelKey = `${activeState.toLowerCase()}_parcels`
+    const activeParcelKey = activeParcelLayerKey ?? `${activeState.toLowerCase()}_parcels`
     setEnabledLayers(prev => {
       const next = { ...prev }
       let changed = false
@@ -652,7 +652,7 @@ export default function SitingPanel() {
       }
     }, 900)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeState, stateOptions, mapReady])
+  }, [activeState, stateOptions, mapReady, activeParcelLayerKey])
 
   // ── switch basemap (dark ↔ satellite) ─────────────────────────────────
   useEffect(() => {
@@ -721,6 +721,16 @@ export default function SitingPanel() {
     [layers, enabledLayers],
   )
 
+  const activeParcelLayerKey = useMemo(() => {
+    const target = `${activeState.toLowerCase()}_parcels`
+    const byKey = layers.find((l) => l.key === target)
+    if (byKey) return byKey.key
+    const byState = layers.find(
+      (l) => l.key.endsWith('_parcels') && (l.state ?? '').toUpperCase() === activeState,
+    )
+    return byState?.key ?? null
+  }, [layers, activeState])
+
   function setWeight(factor: string, val: number) {
     setWeightOverrides(w => ({ ...w, [factor]: val }))
   }
@@ -787,10 +797,10 @@ export default function SitingPanel() {
           </div>
           {Object.entries(
             layers
-              // Only show the parcel layer for the currently selected state.
-              // Each state has its own backend layer key (nc_parcels, sc_parcels, …)
-              // so we filter the others out to keep the UI clean.
-              .filter(l => !l.key.endsWith('_parcels') || (l.state ?? '').toUpperCase() === activeState)
+              // Only show a single parcel toggle for the active state.
+              // Fallback to key-prefix matching so this still works even if
+              // backend metadata is stale/missing `state`.
+              .filter(l => !l.key.endsWith('_parcels') || l.key === activeParcelLayerKey)
               .reduce<Record<string, LiveLayer[]>>((acc, l) => {
                 (acc[l.group] ||= []).push(l)
                 return acc

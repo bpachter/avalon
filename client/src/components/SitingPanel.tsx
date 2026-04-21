@@ -29,33 +29,24 @@ import './SitingPanel.css'
 const STYLE_DARK =
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 
-// ESRI World Imagery raster tiles — used for the satellite toggle
+// USGS National Map satellite imagery — free, government-hosted, no API key required.
+// Replaces ESRI arcgisonline.com which ERR_CONNECTION_RESETs from GitHub Pages.
 const STYLE_SATELLITE: maplibregl.StyleSpecification = {
   version: 8,
-  glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+  glyphs: 'https://fonts.cartocdn.com/gl/{fontstack}/{range}.pbf',
   sources: {
-    'esri-imagery': {
+    satellite: {
       type: 'raster',
       tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
-      attribution:
-        'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, USDA, USGS, AeroGRID, IGN',
-    },
-    'esri-labels': {
-      type: 'raster',
-      tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-        'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
+      maxzoom: 16,
+      attribution: 'Tiles courtesy of the U.S. Geological Survey',
     },
   },
   layers: [
-    { id: 'imagery', type: 'raster', source: 'esri-imagery' },
-    { id: 'labels', type: 'raster', source: 'esri-labels', paint: { 'raster-opacity': 0.8 } },
+    { id: 'satellite', type: 'raster', source: 'satellite' },
   ],
 }
 

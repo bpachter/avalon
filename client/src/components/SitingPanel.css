@@ -164,6 +164,20 @@
   color: var(--cyan);
   font-size: 13px;
 }
+.factor-tag {
+  font-size: 9px;
+  color: var(--amber-dim);
+  letter-spacing: 0.1em;
+}
+.coverage-badge {
+  font-size: 10px;
+  color: var(--white-dim);
+  letter-spacing: 0.08em;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border-left: 2px solid var(--cyan-dim);
+  background: #08060a;
+}
 .weight-row input[type=range] {
   width: 100%;
   accent-color: var(--cyan);

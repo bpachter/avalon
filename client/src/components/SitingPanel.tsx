@@ -10,6 +10,7 @@ import {
   fetchSitingStates,
   fetchSitingMoratoriums,
   fetchParcelDetail,
+  fetchParcelAttrs,
   scoreSites,
   type Archetype,
   type LiveLayer,
@@ -18,6 +19,7 @@ import {
   type StateOption,
   type MoratoriumCounty,
   type ParcelDetail,
+  type ParcelAttrs,
 } from '../api'
 import './SitingPanel.css'
 
@@ -181,7 +183,7 @@ export default function SitingPanel() {
   // ── new: state selector, satellite toggle, moratoriums, parcel popup ──
   const [stateOptions, setStateOptions] = useState<StateOption[]>([])
   const [activeState, setActiveState] = useState<string>('NC')
-  const [basemap, setBasemap] = useState<'dark' | 'satellite'>('dark')
+  const [basemap, setBasemap] = useState<'dark' | 'satellite'>('satellite')
   const [moratoriums, setMoratoriums] = useState<MoratoriumCounty[]>([])
   const moratoriumKeys = useMemo(() => {
     // Build {STATE_NAME|NAME → status} keys for fast lookup in MapLibre filter
@@ -195,8 +197,11 @@ export default function SitingPanel() {
     lon: number
     props: Record<string, unknown>
     detail?: ParcelDetail
+    attrs?: ParcelAttrs
     loading?: boolean
   } | null>(null)
+
+  const [stubCoverage, setStubCoverage] = useState<Record<string, number>>({})
 
   // ── init: catalog + layer list + sample sites ─────────────────────────
   const loadCatalog = useCallback(() => {
@@ -218,6 +223,7 @@ export default function SitingPanel() {
     loadCatalog()
     fetchSitingSample()
       .then(async (r) => {
+        if (r.stub_coverage) setStubCoverage(r.stub_coverage)
         if (Array.isArray(r.results)) {
           const inputs = toSiteInputsFromResults(r.results)
           if (inputs.length > 0) {
@@ -226,12 +232,14 @@ export default function SitingPanel() {
             return
           }
           const scored = await scoreSites({ sites: FALLBACK_SAMPLE_SITES, archetype })
+          if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
           setSiteInputs(FALLBACK_SAMPLE_SITES)
           setSites(mergeCoordsIntoResults(scored.results, FALLBACK_SAMPLE_SITES))
           return
         }
         if (Array.isArray(r.sites) && r.sites.length > 0) {
           const scored = await scoreSites({ sites: r.sites, archetype })
+          if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
           setSiteInputs(r.sites)
           setSites(mergeCoordsIntoResults(scored.results, r.sites))
         }
@@ -242,6 +250,7 @@ export default function SitingPanel() {
             sites: FALLBACK_SAMPLE_SITES,
             archetype,
           })
+          if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
           setSiteInputs(FALLBACK_SAMPLE_SITES)
           setSites(mergeCoordsIntoResults(scored.results, FALLBACK_SAMPLE_SITES))
         } catch (e) {
@@ -461,8 +470,8 @@ export default function SitingPanel() {
           id: LYR, type: 'line', source: SRC,
           paint: { 'line-color': lyr.color, 'line-width': 0.9, 'line-opacity': 0.85 },
         }, 'sites-halo')
-        // Click → parcel popup with proximity stats
-        if (key === 'nc_parcels' || key === 'nc_parcels_pts') {
+        // Click → parcel popup with proximity stats + public-data enrichment
+        if (key === 'nc_parcels') {
           const onClick = (e: any) => {
             const f = e.features?.[0]
             if (!f) return
@@ -472,12 +481,23 @@ export default function SitingPanel() {
               props: f.properties as Record<string, unknown>,
               loading: true,
             })
+            // Kick off proximity + enrichment in parallel.
             fetchParcelDetail(e.lngLat.lat, e.lngLat.lng).then(d => {
-              if ('error' in d) {
+              if ('error' in d) return
+              setParcelPopup(p => p && { ...p, detail: d })
+            })
+            fetchParcelAttrs(e.lngLat.lat, e.lngLat.lng).then(a => {
+              if ('error' in a) {
                 setParcelPopup(p => p && { ...p, loading: false })
                 return
               }
-              setParcelPopup(p => p && { ...p, detail: d, loading: false })
+              setParcelPopup(p => p && {
+                ...p,
+                attrs: a,
+                // If ArcGIS returned richer parcel props (outFields=*), prefer them.
+                props: a.parcel ? { ...p.props, ...a.parcel } : p.props,
+                loading: false,
+              })
             })
           }
           const onEnter = () => { map.getCanvas().style.cursor = 'pointer' }
@@ -569,6 +589,7 @@ export default function SitingPanel() {
         weight_overrides: Object.keys(weightOverrides).length ? weightOverrides : undefined,
       })
       setSites(mergeCoordsIntoResults(r.results, siteInputs))
+      if (r.stub_coverage) setStubCoverage(r.stub_coverage)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -588,20 +609,6 @@ export default function SitingPanel() {
     if (!map) return
     map.flyTo({ center: [s.lon, s.lat], zoom: 8.5, speed: 1.4 })
     setSelectedId(s.site_id)
-  }
-
-  function fitToSites() {
-    const map = mapRef.current
-    if (!map || sites.length === 0) return
-    let xmin = 180, ymin = 90, xmax = -180, ymax = -90
-    for (const s of sites) {
-      if (s.lon < xmin) xmin = s.lon
-      if (s.lon > xmax) xmax = s.lon
-      if (s.lat < ymin) ymin = s.lat
-      if (s.lat > ymax) ymax = s.lat
-    }
-    const bounds: LngLatBoundsLike = [[xmin, ymin], [xmax, ymax]]
-    map.fitBounds(bounds, { padding: 80, duration: 800 })
   }
 
   const ranked = useMemo(
@@ -721,14 +728,28 @@ export default function SitingPanel() {
             <span>WEIGHTS · {archetype}</span>
             <button className="link-btn" onClick={resetWeights}>reset</button>
           </div>
+          {factorList.length > 0 && Object.keys(stubCoverage).length > 0 && (() => {
+            const real = factorList.filter(f => (stubCoverage[f] ?? 1) < 1).length
+            const pct = Math.round((real / factorList.length) * 100)
+            return (
+              <div className="coverage-badge" title="Fraction of factors producing real (non-imputed) sub-scores for at least one site.">
+                data coverage · <span style={{ color: pct >= 50 ? 'var(--green)' : 'var(--amber)' }}>{real}/{factorList.length}</span> factors live ({pct}%)
+              </div>
+            )
+          })()}
           <div className="weight-list">
             {factorList.map(f => {
               const base = baseWeights[f] ?? 0
               const cur = weightOverrides[f] ?? base
+              const cov = stubCoverage[f]
+              const stubbed = cov != null && cov >= 1
               return (
                 <div key={f} className="weight-row">
                   <div className="weight-row-head">
-                    <span className="factor-name">{f}</span>
+                    <span className="factor-name">
+                      {f}
+                      {stubbed && <span className="factor-tag" title="imputed from cohort median (no real data yet)"> · STUB</span>}
+                    </span>
                     <span className="factor-val">{(cur * 100).toFixed(0)}</span>
                   </div>
                   <input
@@ -757,7 +778,6 @@ export default function SitingPanel() {
       <div className="siting-mapwrap">
         <div ref={mapDivRef} className="siting-map" />
         <div className="map-toolbar">
-          <button onClick={fitToSites}>FIT</button>
           <button
             className={basemap === 'satellite' ? 'active' : ''}
             onClick={() => setBasemap(b => b === 'dark' ? 'satellite' : 'dark')}
@@ -773,35 +793,71 @@ export default function SitingPanel() {
               <button className="link-btn" onClick={() => setParcelPopup(null)}>×</button>
             </div>
             <div className="parcel-popup-body">
-              <div className="parcel-row">
-                <span>owner</span>
-                <span>{String(parcelPopup.props.ownname ?? parcelPopup.props.OWNNAME ?? '—')}</span>
-              </div>
-              <div className="parcel-row">
-                <span>parcel #</span>
-                <span>{String(parcelPopup.props.parno ?? parcelPopup.props.PARNO ?? '—')}</span>
-              </div>
               {(() => {
                 const p = parcelPopup.props as Record<string, unknown>
-                const acres = p.deedacres ?? p.DEEDACRES ?? p.calc_acres ?? p.CALC_ACRES ?? p.acres ?? p.ACRES
-                return (
-                  <div className="parcel-row">
-                    <span>acreage</span>
-                    <span>{acres == null ? '—' : Number(acres).toFixed(2)}</span>
+                const pick = (...keys: string[]) => {
+                  for (const k of keys) {
+                    const v = p[k] ?? p[k.toUpperCase()] ?? p[k.toLowerCase()]
+                    if (v != null && v !== '') return v
+                  }
+                  return null
+                }
+                const owner = pick('ownname', 'owner', 'ownname1', 'deedowner')
+                const parno = pick('parno', 'pin', 'parcelid', 'parcel_id')
+                const acres = pick('deedacres', 'calc_acres', 'calcacres', 'acres', 'gisacres')
+                const landVal = pick('landval', 'landvalue')
+                const improvVal = pick('improvval', 'improvvalue', 'bldgval')
+                const totalVal = pick('totalval', 'totval', 'parvaltot')
+                const address = pick('siteaddress', 'situs_addr', 'addr', 'propaddr')
+                const city = pick('sitecity', 'city', 'situs_city')
+                const zoning = pick('zoning', 'zonecode', 'landuse', 'luc')
+                const yearBuilt = pick('yearbuilt', 'yrblt')
+                const rows: Array<[string, string]> = []
+                if (owner) rows.push(['owner', String(owner)])
+                if (parno) rows.push(['parcel #', String(parno)])
+                if (address) rows.push(['address', [address, city].filter(Boolean).join(', ')])
+                if (acres != null) rows.push(['acreage', Number(acres).toFixed(2)])
+                if (zoning) rows.push(['zoning / land use', String(zoning)])
+                if (yearBuilt) rows.push(['year built', String(yearBuilt)])
+                if (landVal != null) rows.push(['land $', `$${Number(landVal).toLocaleString()}`])
+                if (improvVal != null) rows.push(['improvement $', `$${Number(improvVal).toLocaleString()}`])
+                if (totalVal != null) rows.push(['total assessed $', `$${Number(totalVal).toLocaleString()}`])
+                rows.push(['location', `${parcelPopup.lat.toFixed(4)}°, ${parcelPopup.lon.toFixed(4)}°`])
+                return rows.map(([k, v]) => (
+                  <div className="parcel-row" key={k}>
+                    <span>{k}</span><span>{v || '—'}</span>
                   </div>
-                )
+                ))
               })()}
-              <div className="parcel-row">
-                <span>improvement $</span>
-                <span>{(() => {
-                  const v = parcelPopup.props.improvval ?? parcelPopup.props.IMPROVVAL
-                  return v == null ? '—' : `$${Number(v).toLocaleString()}`
-                })()}</span>
-              </div>
-              <div className="parcel-row">
-                <span>location</span>
-                <span>{parcelPopup.lat.toFixed(4)}°, {parcelPopup.lon.toFixed(4)}°</span>
-              </div>
+
+              {parcelPopup.attrs?.census && (
+                <>
+                  <div className="parcel-section">JURISDICTION</div>
+                  <div className="parcel-row">
+                    <span>county</span>
+                    <span>{parcelPopup.attrs.census.county ?? '—'}{parcelPopup.attrs.census.county_fips ? ` (${parcelPopup.attrs.census.county_fips})` : ''}</span>
+                  </div>
+                  <div className="parcel-row">
+                    <span>census tract</span>
+                    <span>{parcelPopup.attrs.census.tract_fips ?? '—'}</span>
+                  </div>
+                </>
+              )}
+
+              {parcelPopup.attrs?.flood && (
+                <>
+                  <div className="parcel-section">FLOOD (FEMA NFHL)</div>
+                  <div className="parcel-row">
+                    <span>zone</span>
+                    <span>{parcelPopup.attrs.flood.zone ?? '—'}</span>
+                  </div>
+                  <div className="parcel-row">
+                    <span>SFHA</span>
+                    <span>{parcelPopup.attrs.flood.in_special_flood_hazard_area ? 'YES (risk)' : 'no'}</span>
+                  </div>
+                </>
+              )}
+
               <div className="parcel-section">PROXIMITY</div>
               {parcelPopup.loading && <div className="parcel-row"><span>computing…</span></div>}
               {parcelPopup.detail?.results.map(r => (
@@ -810,6 +866,13 @@ export default function SitingPanel() {
                   <span>{r.distance_mi == null ? '— (none in 5 mi)' : `${r.distance_mi} mi`}</span>
                 </div>
               ))}
+
+              {parcelPopup.attrs?.sources && parcelPopup.attrs.sources.length > 0 && (
+                <div className="parcel-row" style={{ marginTop: 8, fontSize: 9, color: '#6a7484' }}>
+                  <span>sources</span>
+                  <span>{parcelPopup.attrs.sources.join(' · ')}</span>
+                </div>
+              )}
             </div>
           </div>
         )}

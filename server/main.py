@@ -110,7 +110,10 @@ def siting_score(req: SitingRequest):
             archetype=req.archetype,
             weight_overrides=req.weight_overrides,
         )
-        return {"results": [r.to_dict() for r in results]}
+        return {
+            "results": [r.to_dict() for r in results],
+            "stub_coverage": score_mod.stub_coverage(results),
+        }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -135,7 +138,10 @@ def siting_sample():
                     extras={k: v for k, v in row.items() if k not in {"site_id", "lat", "lon"}},
                 ))
         results = score_mod.score_sites(sites, archetype="training")
-        return {"results": [r.to_dict() for r in results]}
+        return {
+            "results": [r.to_dict() for r in results],
+            "stub_coverage": score_mod.stub_coverage(results),
+        }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -235,13 +241,6 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "polygon", "color": "#a0a8b4", "style": "moratorium", "min_zoom": 6,
         "source": "HIFLD", "max_records": 4000,
     },
-    "nc_parcels_pts": {
-        "name": "Parcels — points (NC)", "group": "Boundaries",
-        "url": f"{_NCONEMAP}/NC1Map_Parcels/FeatureServer/0",
-        "where": "1=1", "out_fields": "objectid,parno,ownname,improvval",
-        "geom": "point", "color": "#fff04a", "min_zoom": 11,
-        "source": "NC OneMap", "max_records": 4000,
-    },
     "nc_parcels": {
         "name": "Parcel outlines (NC)", "group": "Boundaries",
         "url": f"{_NCONEMAP}/NC1Map_Parcels/FeatureServer/1",
@@ -336,10 +335,15 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
         return JSONResponse(status_code=400, content={"error": f"bad bbox: {e}"})
 
     extra_where: str | None = None
-    if state and layer_key in {"power_plants", "power_plants_duke"}:
-        full = _STATE_FULL_NAME.get(state.upper())
-        if full:
-            extra_where = f"State='{full}'"
+    if state:
+        st = state.upper()
+        if layer_key in {"power_plants", "power_plants_duke"}:
+            full = _STATE_FULL_NAME.get(st)
+            if full:
+                extra_where = f"State='{full}'"
+        elif layer_key in {"transmission", "transmission_duke"}:
+            # HIFLD transmission lines expose two-letter state codes in STATE_1/STATE_2.
+            extra_where = f"STATE_1='{st}' OR STATE_2='{st}'"
 
     cap = int(cfg.get("max_records", 4000))
     target = min(limit, cap)
@@ -469,3 +473,127 @@ def siting_parcel_detail(lat: float, lon: float, radius_mi: float = 5.0):
             "properties": best_props,
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# Parcel attribute lookup (NC OneMap) + public-data enrichment
+# ---------------------------------------------------------------------------
+
+# Census Geocoder — returns county/state/tract/block for any CONUS point.
+_CENSUS_GEOCODER = (
+    "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
+)
+
+# FEMA National Flood Hazard Layer — flood-zone lookup at point.
+_FEMA_NFHL = (
+    "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query"
+)
+
+# USGS National Structures (schools/hospitals/gov) — richer optional enrichment.
+# (Kept for future; not hit here to bound latency.)
+
+
+@app.get("/api/siting/parcel_attrs")
+def siting_parcel_attrs(lat: float, lon: float):
+    """Return the NC parcel record at (lat,lon) plus public-data enrichment.
+
+    - NC OneMap parcel attributes (owner, acreage, values, address, zoning hints)
+    - US Census Bureau: county / FIPS / tract / block
+    - FEMA NFHL: 100-yr floodplain zone at the point
+
+    All three calls are best-effort; partial data is returned on failure so
+    the UI always gets a populated popup rather than a blank error.
+    """
+    import requests as _rq
+
+    result: dict = {"lat": lat, "lon": lon, "sources": []}
+
+    # 1) NC parcel attributes — point-in-polygon query against FeatureServer/1
+    parcel_cfg = LIVE_LAYER_REGISTRY.get("nc_parcels")
+    if parcel_cfg:
+        from urllib.parse import urlencode
+        params = {
+            "where": "1=1",
+            "outFields": "*",
+            "f": "geojson",
+            "outSR": 4326,
+            "inSR": 4326,
+            "geometryType": "esriGeometryPoint",
+            "geometry": f"{lon},{lat}",
+            "spatialRel": "esriSpatialRelIntersects",
+            "returnGeometry": "false",
+            "resultRecordCount": 1,
+        }
+        url = parcel_cfg["url"] + "/query?" + urlencode(params)
+        try:
+            r = _rq.get(url, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                feats = data.get("features") or []
+                if feats:
+                    result["parcel"] = feats[0].get("properties") or {}
+                    result["sources"].append("NC OneMap parcels")
+        except Exception as e:
+            result["parcel_error"] = str(e)
+
+    # 2) Census Geocoder — county / tract / block
+    try:
+        r = _rq.get(
+            _CENSUS_GEOCODER,
+            params={
+                "x": lon, "y": lat,
+                "benchmark": "Public_AR_Current",
+                "vintage": "Current_Current",
+                "format": "json",
+            },
+            timeout=15,
+        )
+        if r.status_code == 200:
+            g = r.json().get("result", {}).get("geographies", {}) or {}
+            counties = g.get("Counties") or []
+            tracts = g.get("Census Tracts") or []
+            blocks = g.get("2020 Census Blocks") or g.get("Census Blocks") or []
+            result["census"] = {
+                "county": counties[0].get("NAME") if counties else None,
+                "state": counties[0].get("STATE") if counties else None,
+                "county_fips": counties[0].get("GEOID") if counties else None,
+                "tract_fips": tracts[0].get("GEOID") if tracts else None,
+                "block_fips": blocks[0].get("GEOID") if blocks else None,
+            }
+            result["sources"].append("US Census Bureau")
+    except Exception as e:
+        result["census_error"] = str(e)
+
+    # 3) FEMA flood zone
+    try:
+        from urllib.parse import urlencode
+        params = {
+            "where": "1=1",
+            "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF",
+            "f": "json",
+            "geometryType": "esriGeometryPoint",
+            "geometry": f"{lon},{lat}",
+            "inSR": 4326,
+            "spatialRel": "esriSpatialRelIntersects",
+            "returnGeometry": "false",
+            "resultRecordCount": 1,
+        }
+        r = _rq.get(_FEMA_NFHL + "?" + urlencode(params), timeout=15)
+        if r.status_code == 200:
+            feats = r.json().get("features") or []
+            if feats:
+                attrs = feats[0].get("attributes") or {}
+                zone = attrs.get("FLD_ZONE")
+                result["flood"] = {
+                    "zone": zone,
+                    "subtype": attrs.get("ZONE_SUBTY"),
+                    "in_special_flood_hazard_area": (attrs.get("SFHA_TF") == "T"),
+                }
+                result["sources"].append("FEMA NFHL")
+            else:
+                result["flood"] = {"zone": "X (outside mapped SFHA)", "in_special_flood_hazard_area": False}
+                result["sources"].append("FEMA NFHL")
+    except Exception as e:
+        result["flood_error"] = str(e)
+
+    return result

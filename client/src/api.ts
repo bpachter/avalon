@@ -98,6 +98,28 @@ export interface ParcelDetail {
   results: ParcelDetailResult[]
 }
 
+export interface ParcelAttrs {
+  lat: number
+  lon: number
+  sources: string[]
+  parcel?: Record<string, unknown>
+  census?: {
+    county?: string | null
+    state?: string | null
+    county_fips?: string | null
+    tract_fips?: string | null
+    block_fips?: string | null
+  }
+  flood?: {
+    zone?: string | null
+    subtype?: string | null
+    in_special_flood_hazard_area?: boolean
+  }
+  parcel_error?: string
+  census_error?: string
+  flood_error?: string
+}
+
 // ─── API calls ────────────────────────────────────────────────────────────
 
 export async function fetchSitingFactors(): Promise<SitingFactorsResponse> {
@@ -107,6 +129,7 @@ export async function fetchSitingFactors(): Promise<SitingFactorsResponse> {
 export async function fetchSitingSample(): Promise<{
   results?: SiteResultDTO[]
   sites?: Array<{ site_id: string; lat: number; lon: number; [k: string]: unknown }>
+  stub_coverage?: Record<string, number>
 }> {
   return fetchJson(`${BASE}/api/siting/sample`, 'siting/sample')
 }
@@ -115,7 +138,7 @@ export async function scoreSites(payload: {
   sites: Array<{ site_id: string; lat: number; lon: number; [k: string]: unknown }>
   archetype?: Archetype
   weight_overrides?: Record<string, number>
-}): Promise<{ results: SiteResultDTO[] }> {
+}): Promise<{ results: SiteResultDTO[]; stub_coverage?: Record<string, number> }> {
   return fetchJson(
     `${BASE}/api/siting/score`, 'siting/score',
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
@@ -167,6 +190,23 @@ export async function fetchParcelDetail(
       return { error: j.error ?? `HTTP ${r.status}` }
     }
     return await parseJsonOrThrow<ParcelDetail>(r, 'siting/parcel_detail')
+  } catch (e) {
+    return { error: String(e) }
+  }
+}
+
+export async function fetchParcelAttrs(
+  lat: number, lon: number,
+): Promise<ParcelAttrs | { error: string }> {
+  const params = new URLSearchParams({ lat: String(lat), lon: String(lon) })
+  try {
+    const r = await fetch(`${BASE}/api/siting/parcel_attrs?${params}`)
+    if (!r.ok) {
+      let j: { error?: string } = {}
+      try { j = await r.json() } catch { /* ignore */ }
+      return { error: j.error ?? `HTTP ${r.status}` }
+    }
+    return await parseJsonOrThrow<ParcelAttrs>(r, 'siting/parcel_attrs')
   } catch (e) {
     return { error: String(e) }
   }

@@ -165,7 +165,10 @@ def siting_sample():
     if score_mod is None:
         return JSONResponse(status_code=503, content={"error": "scoring engine unavailable"})
     import csv as _csv
-    sample_csv = _SCORING / "config" / "sample_sites.csv"
+    scoring_root = _resolve_scoring_root()
+    if scoring_root is None:
+        return JSONResponse(status_code=503, content={"error": "scoring engine unavailable"})
+    sample_csv = scoring_root / "config" / "sample_sites.csv"
     if not sample_csv.exists():
         return JSONResponse(status_code=404, content={"error": "sample_sites.csv missing"})
     try:

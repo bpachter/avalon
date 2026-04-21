@@ -30,7 +30,7 @@ const STYLE_DARK =
 // ESRI World Imagery raster tiles — used for the satellite toggle
 const STYLE_SATELLITE: maplibregl.StyleSpecification = {
   version: 8,
-  glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+  glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
   sources: {
     'esri-imagery': {
       type: 'raster',

@@ -7,6 +7,7 @@ Deploy on Railway; frontend is served from GitHub Pages.
 import logging
 import os
 import sys
+import traceback
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -36,17 +37,52 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 _SCORING = Path(__file__).parent.parent / "scoring"
+_SCORING_IMPORT_ERROR: str | None = None
+
+
+def _resolve_scoring_root() -> Path | None:
+    """Find the scoring package root across local + Railway layouts.
+
+    Railway services are sometimes configured with a non-repo working root,
+    so we probe a small set of likely locations and allow SCORING_PATH override.
+    """
+    env = os.getenv("SCORING_PATH")
+    candidates: list[Path] = []
+    if env:
+        candidates.append(Path(env))
+    here = Path(__file__).resolve()
+    candidates.extend([
+        _SCORING,
+        here.parent / "scoring",
+        here.parent.parent / "scoring",
+        Path.cwd() / "scoring",
+    ])
+    for p in candidates:
+        try:
+            if (p / "src" / "score.py").exists():
+                return p
+        except Exception:
+            continue
+    return None
 
 
 def _import_dcsite():
+    global _SCORING_IMPORT_ERROR
     try:
-        if str(_SCORING) not in sys.path:
-            sys.path.insert(0, str(_SCORING))
+        scoring_root = _resolve_scoring_root()
+        if scoring_root is None:
+            raise FileNotFoundError(
+                "could not locate scoring package root; tried SCORING_PATH, repo-relative, and cwd paths"
+            )
+        if str(scoring_root) not in sys.path:
+            sys.path.insert(0, str(scoring_root))
         import importlib
         score_mod  = importlib.import_module("src.score")
         config_mod = importlib.import_module("src.config")
+        _SCORING_IMPORT_ERROR = None
         return score_mod, config_mod
     except Exception as e:
+        _SCORING_IMPORT_ERROR = f"{e}\n{traceback.format_exc()}"
         logger.warning(f"scoring engine unavailable: {e}")
         return None, None
 
@@ -58,7 +94,12 @@ def _import_dcsite():
 @app.get("/api/health")
 def health():
     _, config_mod = _import_dcsite()
-    return {"status": "ok", "scoring": config_mod is not None}
+    return {
+        "status": "ok",
+        "scoring": config_mod is not None,
+        "scoring_path": str(_resolve_scoring_root()) if _resolve_scoring_root() else None,
+        "scoring_error": _SCORING_IMPORT_ERROR,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -342,8 +383,9 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             if full:
                 extra_where = f"State='{full}'"
         elif layer_key in {"transmission", "transmission_duke"}:
-            # HIFLD transmission lines expose two-letter state codes in STATE_1/STATE_2.
-            extra_where = f"STATE_1='{st}' OR STATE_2='{st}'"
+            # Current HIFLD transmission feed used by the map has no STATE fields.
+            # Keep transmission constrained by bbox only to avoid upstream SQL errors.
+            extra_where = None
 
     cap = int(cfg.get("max_records", 4000))
     target = min(limit, cap)

@@ -211,7 +211,8 @@ export default function SitingPanel() {
       setLayers(r.layers)
       setEnabledLayers(prev => {
         const next: Record<string, boolean> = {}
-        for (const l of r.layers) next[l.key] = prev[l.key] ?? false
+        const defaultsOn = new Set(['transmission', 'transmission_duke', 'natgas_pipelines'])
+        for (const l of r.layers) next[l.key] = prev[l.key] ?? defaultsOn.has(l.key)
         return next
       })
     }).catch(e => setError(String(e)))
@@ -264,7 +265,7 @@ export default function SitingPanel() {
     if (!mapDivRef.current || mapRef.current) return
     const map = new maplibregl.Map({
       container: mapDivRef.current,
-      style: STYLE_DARK,
+      style: basemap === 'satellite' ? STYLE_SATELLITE as any : STYLE_DARK,
       // Center on North Carolina (initial scope per user)
       center: [-79.2, 35.5],
       zoom: 6.2,
@@ -286,7 +287,7 @@ export default function SitingPanel() {
     map.on('moveend', updateBbox)
     map.on('zoomend', updateBbox)
     return () => { map.remove(); mapRef.current = null }
-  }, [])
+  }, [basemap])
 
   // ── candidate site source/layer (re-render when sites change) ─────────
   useEffect(() => {

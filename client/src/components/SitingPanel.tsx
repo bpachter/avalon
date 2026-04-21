@@ -439,8 +439,9 @@ export default function SitingPanel() {
     ].includes(key)
       ? activeState
       : null
-    // Larger limit for line layers so transmission renders contiguously
-    const limit = lyr.geom === 'line' ? 12000 : 6000
+    // Larger limit for line layers so transmission renders contiguously.
+    // Parcel layers use their own configured max_records for performance.
+    const limit = lyr.geom === 'line' ? 12000 : (lyr.key.endsWith('_parcels') ? 2000 : 6000)
     const data = await fetchSitingProxyGeoJSON(key, bbox, limit, stateFilter)
     if ('error' in data) {
       setLayerStatus(s => ({ ...s, [key]: 'error' }))

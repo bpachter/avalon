@@ -326,7 +326,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": f"{_NCONEMAP}/NC1Map_Parcels/FeatureServer/1",
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "NC OneMap", "max_records": 4000,
+        "source": "NC OneMap", "max_records": 2000, "page_size": 1000,
         "state": "NC",
     },
     "sc_parcels": {
@@ -336,7 +336,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "https://services1.arcgis.com/2AGLxyiJoNiVHKwq/arcgis/rest/services/Parcels/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "York County SC GIS", "max_records": 4000,
+        "source": "York County SC GIS", "max_records": 2000, "page_size": 1000,
         "state": "SC",
     },
     "fl_parcels": {
@@ -344,7 +344,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "FDOR Cadastral (FL DOR)", "max_records": 4000,
+        "source": "FDOR Cadastral (FL DOR)", "max_records": 1500, "page_size": 500,
         "state": "FL",
     },
     "in_parcels": {
@@ -352,7 +352,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "IndianaMap (IGIO)", "max_records": 4000,
+        "source": "IndianaMap (IGIO)", "max_records": 2000, "page_size": 1000,
         "state": "IN",
     },
     "oh_parcels": {
@@ -360,7 +360,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "OGRIP Ohio Statewide Parcels", "max_records": 4000,
+        "source": "OGRIP Ohio Statewide Parcels", "max_records": 2000, "page_size": 1000,
         "state": "OH",
     },
     "ky_parcels": {
@@ -370,7 +370,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/New_AllParcels/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
         "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "Jefferson County KY PVA", "max_records": 4000,
+        "source": "Jefferson County KY PVA", "max_records": 2000, "page_size": 1000,
         "state": "KY",
     },
 }

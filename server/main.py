@@ -808,6 +808,7 @@ _TIGER_STATES = (
     "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/0"
 )
 _STATE_BOUNDARY_CACHE: dict[str, dict] = {}
+_STATE_POLYGON_CACHE: dict[str, object | None] = {}
 
 
 def _state_boundary_fc(state: str | None):
@@ -847,6 +848,71 @@ def _state_boundary_fc(state: str | None):
     }
     _STATE_BOUNDARY_CACHE[st] = fc
     return fc
+
+
+def _state_polygon_geom(state: str | None):
+    """Return shapely geometry for the selected state polygon (cached)."""
+    if not state:
+        return None
+    st = state.upper()
+    if st in _STATE_POLYGON_CACHE:
+        return _STATE_POLYGON_CACHE[st]
+    fc = _state_boundary_fc(st)
+    feats = fc.get("features", []) if isinstance(fc, dict) else []
+    if not feats:
+        _STATE_POLYGON_CACHE[st] = None
+        return None
+    try:
+        from shapely.geometry import shape as _shape
+        from shapely.ops import unary_union as _unary_union
+        polys = []
+        for f in feats:
+            g = f.get("geometry") if isinstance(f, dict) else None
+            if not g:
+                continue
+            geom = _shape(g)
+            if not geom.is_empty:
+                polys.append(geom)
+        poly = _unary_union(polys) if polys else None
+        _STATE_POLYGON_CACHE[st] = poly
+        return poly
+    except Exception:
+        _STATE_POLYGON_CACHE[st] = None
+        return None
+
+
+def _clip_features_to_state_polygon(features: list[dict], state: str | None) -> tuple[list[dict], bool]:
+    """Clip line features to the actual state boundary polygon.
+
+    ArcGIS envelope intersection returns full polyline geometry, so a line that
+    merely touches the selected state can still render far outside it. This
+    post-process clips returned geometries to the state polygon silhouette.
+    """
+    poly = _state_polygon_geom(state)
+    if poly is None:
+        return features, False
+    try:
+        from shapely.geometry import shape as _shape, mapping as _mapping
+    except Exception:
+        return features, False
+
+    clipped: list[dict] = []
+    for f in features:
+        geom = f.get("geometry") if isinstance(f, dict) else None
+        if not geom:
+            continue
+        try:
+            g = _shape(geom)
+            g2 = g.intersection(poly)
+            if g2.is_empty:
+                continue
+            nf = dict(f)
+            nf["geometry"] = _mapping(g2)
+            clipped.append(nf)
+        except Exception:
+            # Keep original feature if a single geometry fails conversion.
+            clipped.append(f)
+    return clipped, True
 
 
 # ── PeeringDB facilities ("Fiber POPs") ───────────────────────────────
@@ -1213,6 +1279,10 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             },
         })
 
+    state_polygon_clipped = False
+    if state and layer_key in {"transmission", "transmission_duke", "natgas_pipelines"}:
+        feats, state_polygon_clipped = _clip_features_to_state_polygon(feats, state)
+
     response = JSONResponse({
         "type": "FeatureCollection",
         "features": feats[:target],
@@ -1223,6 +1293,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             "returned": len(feats), "limit": target,
             "bbox": bbox, "bbox_used": f"{bbox_t[0]},{bbox_t[1]},{bbox_t[2]},{bbox_t[3]}",
             "state": state, "truncated": truncated, "live": True,
+            "state_polygon_clipped": state_polygon_clipped,
             "source_count": len(source_urls), "source_breakdown": source_breakdown,
             "warning": upstream_warning,
         },

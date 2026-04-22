@@ -362,15 +362,6 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "line", "color": "#a07a40", "min_zoom": 4,
         "source": "HIFLD", "max_records": 4000,
     },
-    "fiber_lines": {
-        "name": "Fiber optic lines", "group": "Connectivity",
-        "url": "__INTERNAL__/fiber_lines",
-        "where": "1=1", "out_fields": "*",
-        "geom": "line", "color": "#ffa726", "min_zoom": 4,
-        "source": "Global Fiber / OSM",
-        "max_records": 5000, "page_size": 1000,
-        "internal": True,
-    },
     # Fiber optic lines are temporarily hidden from the app. Keep the internal
     # implementation below for quick re-enable when data quality stabilizes.
     "fema_flood_zones": {

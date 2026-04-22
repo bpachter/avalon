@@ -160,7 +160,6 @@ def siting_score(req: SitingRequest):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-@app.get("/api/siting/sample")
 def _fallback_sample_sites_for_state(state: str, count: int) -> list[dict]:
     import csv as _csv
     scoring_root = _resolve_scoring_root()

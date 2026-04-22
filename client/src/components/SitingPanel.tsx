@@ -866,6 +866,11 @@ export default function SitingPanel() {
     [sites],
   )
 
+  const displayedRanked = useMemo(
+    () => ranked.slice(0, TOP_SITE_COUNT),
+    [ranked],
+  )
+
   const factorList = factorsCatalog?.factors ?? []
   const baseWeights = factorsCatalog?.weights[archetype] ?? {}
 
@@ -1321,11 +1326,11 @@ export default function SitingPanel() {
       {/* ── Right rail: ranked list ── */}
       <aside className="siting-rank">
         <div className="siting-side-head">
-          <span className="siting-title">TOP 20 · {activeState}</span>
+          <span className="siting-title">TOP {displayedRanked.length} · {activeState}</span>
           <span className="siting-sub">{archetype}</span>
         </div>
         <ol className="rank-list">
-          {ranked.map((s, i) => {
+          {displayedRanked.map((s, i) => {
             const killed = Object.values(s.kill_flags).some(Boolean)
             return (
               <li

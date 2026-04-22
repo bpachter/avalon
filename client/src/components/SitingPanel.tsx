@@ -703,8 +703,13 @@ export default function SitingPanel() {
       zoom < 13.5 ? 350 :
       zoom < 14.5 ? 700 :
       1200
+    const fiberLimit =
+      zoom < 6 ? 500 :
+      zoom < 8 ? 900 :
+      1400
     const limit =
       lyr.key.endsWith('_parcels') ? parcelLimit :
+      lyr.key === 'fiber_lines' ? fiberLimit :
       lyr.key === 'county_subdivisions' ? 2500 :
       50000
     let data: any

@@ -968,7 +968,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     except Exception as exc:  # noqa: BLE001
         primary_warning = f"Primary fiber source unavailable ({type(exc).__name__}: {exc})"
 
-    sparse_threshold = min(limit, 240)
+    sparse_threshold = min(limit, 120)
     merged: list[dict] = list(primary_feats)
     merged_seen: set[str] = set(primary_seen)
 
@@ -1040,7 +1040,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     }
     for ep in _OVERPASS_ENDPOINTS:
         try:
-            r = _rq.post(ep, data={"data": ql}, headers=headers, timeout=45)
+            r = _rq.post(ep, data={"data": ql}, headers=headers, timeout=20)
             if r.status_code == 200:
                 data = r.json()
                 break

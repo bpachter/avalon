@@ -779,9 +779,9 @@ def _resilient_get(url: str, *, timeout: int = 30, retries: int = 3):
 # long-haul fiber as `telecom=line`, `man_made=cable` (telecom), or
 # `communication=line`. We union these into a single FeatureCollection.
 _OVERPASS_ENDPOINTS = [
+    "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://lz4.overpass-api.de/api/interpreter",
 ]
 
 _FIBER_SEARCH_URL = "https://www.arcgis.com/sharing/rest/search"
@@ -972,13 +972,12 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     merged: list[dict] = list(primary_feats)
     merged_seen: set[str] = set(primary_seen)
 
-    # For very small bboxes (zoomed in), skip expensive state discovery and
-    # proceed directly to Overpass fallback. Bboxes < 0.1 deg in either dimension
-    # are city-scale or smaller; state discovery wastes 10-20 seconds on ArcGIS
-    # count checks when Overpass will provide results in 2-3 seconds.
+    # For city-scale bboxes (zoomed in), skip expensive state discovery and
+    # proceed directly to Overpass fallback. State discovery can add 10-20+
+    # seconds with little benefit for these windows.
     bbox_width = xmax - xmin
     bbox_height = ymax - ymin
-    is_zoomed_in = bbox_width < 0.1 or bbox_height < 0.1
+    is_zoomed_in = max(bbox_width, bbox_height) <= 0.25
 
     # Auto-discover state-level ArcGIS fiber services to improve coverage
     # beyond the global feed, then merge unique features.
@@ -1026,11 +1025,11 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     # `communication=line` tag returns most NC long-haul routes; the others
     # catch regional variations and underground/aerial cables. Keep
     # underwater submarine cables out (location!='underwater').
-    # Timeout set to 20s to match HTTP timeout below. Overpass returns best-effort
-    # results if it hits the limit, so this prevents long hangs while still allowing
-    # complex multi-tag queries to complete.
+    # Use a shorter timeout for zoomed-in bboxes to avoid long waits on
+    # overloaded public Overpass mirrors.
+    overpass_query_timeout = 8 if is_zoomed_in else 20
     ql = (
-        f"[out:json][timeout:20];"
+        f"[out:json][timeout:{overpass_query_timeout}];"
         f"("
         f"  way['telecom'='line']({ymin},{xmin},{ymax},{xmax});"
         f"  way['communication'='line']({ymin},{xmin},{ymax},{xmax});"
@@ -1049,9 +1048,17 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
         "User-Agent": "avalon-siting/1.0 (+https://github.com/bpachter/avalon)",
         "Accept": "application/json",
     }
-    for ep in _OVERPASS_ENDPOINTS:
+    overpass_http_timeout = 4 if is_zoomed_in else 20
+    overpass_endpoints = _OVERPASS_ENDPOINTS[:1] if is_zoomed_in else _OVERPASS_ENDPOINTS
+    for ep in overpass_endpoints:
         try:
-            r = _rq.post(ep, data={"data": ql}, headers=headers, timeout=20)
+            # Tuple timeout = (connect_timeout, read_timeout)
+            r = _rq.post(
+                ep,
+                data={"data": ql},
+                headers=headers,
+                timeout=(3, overpass_http_timeout),
+            )
             if r.status_code == 200:
                 data = r.json()
                 break

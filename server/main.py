@@ -781,12 +781,44 @@ def _resilient_get(url: str, *, timeout: int = 30, retries: int = 3):
 _OVERPASS_ENDPOINTS = [
     "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
 ]
 
 _FIBER_SEARCH_URL = "https://www.arcgis.com/sharing/rest/search"
 _FIBER_SOURCE_CACHE: dict[str, dict] = {}
 _FIBER_CACHE_TTL_SEC = 6 * 60 * 60
+
+
+def _looks_like_fiber_item(item: dict) -> bool:
+    """Heuristic filter for ArcGIS search hits related to fiber routes."""
+    text_parts: list[str] = []
+    for k in ("title", "snippet", "description", "url"):
+        v = item.get(k)
+        if isinstance(v, str):
+            text_parts.append(v)
+    tags = item.get("tags")
+    if isinstance(tags, list):
+        text_parts.extend(str(t) for t in tags)
+    type_keywords = item.get("typeKeywords")
+    if isinstance(type_keywords, list):
+        text_parts.extend(str(t) for t in type_keywords)
+
+    t = " ".join(text_parts).lower()
+    include_terms = ("fiber", "fibre", "telecom", "optic", "optical")
+    exclude_terms = (
+        "smoking",
+        "parking",
+        "parcel",
+        "zoning",
+        "flood",
+        "school",
+        "crime",
+        "election",
+    )
+    if not any(term in t for term in include_terms):
+        return False
+    if any(term in t for term in exclude_terms):
+        return False
+    return True
 
 
 def _norm_arcgis_layer_url(url: str | None) -> str | None:
@@ -800,12 +832,12 @@ def _norm_arcgis_layer_url(url: str | None) -> str | None:
     return None
 
 
-def _state_fiber_sources(state: str, bbox_t: tuple[float, float, float, float], *, max_sources: int = 3) -> list[str]:
+def _state_fiber_sources(state: str, *, max_sources: int = 4) -> list[str]:
     st = state.upper().strip()
     now = time.time()
     cached = _FIBER_SOURCE_CACHE.get(st)
     if cached and (now - float(cached.get("ts", 0))) < _FIBER_CACHE_TTL_SEC:
-        return list(cached.get("urls") or [])
+        return list(cached.get("urls") or [])[:max_sources]
 
     full = _STATE_FULL_NAME.get(st, st)
     queries = [
@@ -828,32 +860,24 @@ def _state_fiber_sources(state: str, bbox_t: tuple[float, float, float, float], 
             for it in data.get("results") or []:
                 if len(found) >= max_sources:
                     break
+                if not _looks_like_fiber_item(it):
+                    continue
                 layer_url = _norm_arcgis_layer_url(it.get("url"))
                 if not layer_url or layer_url in seen:
                     continue
-                seen.add(layer_url)
+                # Keep only line-geometry services so we don't chase unrelated
+                # non-fiber datasets returned by generic ArcGIS search.
                 try:
-                    qr = _rq.get(
-                        layer_url + "/query",
-                        params={
-                            "where": "1=1",
-                            "returnCountOnly": "true",
-                            "f": "json",
-                            "geometry": f"{bbox_t[0]},{bbox_t[1]},{bbox_t[2]},{bbox_t[3]}",
-                            "geometryType": "esriGeometryEnvelope",
-                            "inSR": 4326,
-                            "spatialRel": "esriSpatialRelIntersects",
-                        },
-                        timeout=12,
-                    )
-                    if qr.status_code != 200:
+                    meta = _rq.get(layer_url, params={"f": "json"}, timeout=8)
+                    if meta.status_code != 200:
                         continue
-                    cnt = int((qr.json() or {}).get("count") or 0)
-                    if cnt <= 0:
+                    geom_type = str((meta.json() or {}).get("geometryType") or "")
+                    if "Polyline" not in geom_type:
                         continue
-                    found.append(layer_url)
                 except Exception:
                     continue
+                seen.add(layer_url)
+                found.append(layer_url)
         except Exception:
             continue
 
@@ -861,7 +885,14 @@ def _state_fiber_sources(state: str, bbox_t: tuple[float, float, float, float], 
     return found
 
 
-def _arcgis_fiber_feats(source_url: str, bbox_t: tuple[float, float, float, float], *, limit: int) -> list[dict]:
+def _arcgis_fiber_feats(
+    source_url: str,
+    bbox_t: tuple[float, float, float, float],
+    *,
+    limit: int,
+    timeout: int = 25,
+    retries: int = 2,
+) -> list[dict]:
     cfg = {
         "url": source_url,
         "where": "1=1",
@@ -875,7 +906,7 @@ def _arcgis_fiber_feats(source_url: str, bbox_t: tuple[float, float, float, floa
     offset = 0
     while len(feats) < limit:
         url = _arcgis_query_url(cfg, bbox_t, page_size=min(page_size, limit - len(feats)), offset=offset)
-        r = _resilient_get(url, timeout=25, retries=2)
+        r = _resilient_get(url, timeout=timeout, retries=retries)
         if r.status_code != 200:
             break
         data = r.json() or {}
@@ -914,6 +945,13 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
                         "_meta": {"layer": "fiber_lines", "returned": 0, "source": "OpenStreetMap",
                                   "state": state, "clipped_to_state": True, "live": True}}
             xmin, ymin, xmax, ymax = clipped
+
+    # City-scale map windows need lower latency and slightly wider nearby
+    # sampling to avoid "no lines" views when the current viewport misses a
+    # backbone by a small margin.
+    bbox_width = xmax - xmin
+    bbox_height = ymax - ymin
+    is_zoomed_in = max(bbox_width, bbox_height) <= 0.25
     # First try ArcGIS global optical-fiber feed, then supplement with
     # state-discovered ArcGIS services and OSM when sparse.
     primary_url = (
@@ -943,7 +981,11 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
                 "spatialRel": "esriSpatialRelIntersects",
             }
             url = primary_url + "?" + _urlencode(params)
-            r = _resilient_get(url, timeout=30, retries=3)
+            r = _resilient_get(
+                url,
+                timeout=(12 if is_zoomed_in else 30),
+                retries=(1 if is_zoomed_in else 3),
+            )
             if r.status_code != 200:
                 raise RuntimeError(f"Primary fiber source HTTP {r.status_code}")
             data = r.json()
@@ -972,21 +1014,29 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     merged: list[dict] = list(primary_feats)
     merged_seen: set[str] = set(primary_seen)
 
-    # For city-scale bboxes (zoomed in), skip expensive state discovery and
-    # proceed directly to Overpass fallback. State discovery can add 10-20+
-    # seconds with little benefit for these windows.
-    bbox_width = xmax - xmin
-    bbox_height = ymax - ymin
-    is_zoomed_in = max(bbox_width, bbox_height) <= 0.25
-
     # Auto-discover state-level ArcGIS fiber services to improve coverage
     # beyond the global feed, then merge unique features.
-    if state and len(merged) < sparse_threshold and not is_zoomed_in:
-        for src in _state_fiber_sources(state, (xmin, ymin, xmax, ymax), max_sources=3):
+    #
+    # Important: discovery is cached by state only (not bbox). If a first call
+    # happens on a tiny bbox and returns no candidates, bbox-scoped caching can
+    # suppress good sources for the whole state. Keep discovery global to state
+    # and apply bbox only at query time.
+    if state and len(merged) < sparse_threshold:
+        max_state_sources = 2 if is_zoomed_in else 4
+        per_source_limit = min((300 if is_zoomed_in else 700), limit - len(merged))
+        per_source_timeout = 10 if is_zoomed_in else 20
+        per_source_retries = 1 if is_zoomed_in else 2
+        for src in _state_fiber_sources(state, max_sources=max_state_sources):
             if len(merged) >= limit:
                 break
             try:
-                extra = _arcgis_fiber_feats(src, (xmin, ymin, xmax, ymax), limit=min(700, limit - len(merged)))
+                extra = _arcgis_fiber_feats(
+                    src,
+                    (xmin, ymin, xmax, ymax),
+                    limit=per_source_limit,
+                    timeout=per_source_timeout,
+                    retries=per_source_retries,
+                )
             except Exception:
                 continue
             for f in extra:
@@ -999,7 +1049,8 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
                 f["properties"] = props
                 merged.append(f)
 
-    if merged and len(merged) >= sparse_threshold:
+    min_good_count = sparse_threshold if not is_zoomed_in else min(sparse_threshold, 40)
+    if merged and len(merged) >= min_good_count:
         return {
             "type": "FeatureCollection",
             "features": merged,
@@ -1027,16 +1078,36 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     # underwater submarine cables out (location!='underwater').
     # Use a shorter timeout for zoomed-in bboxes to avoid long waits on
     # overloaded public Overpass mirrors.
-    overpass_query_timeout = 8 if is_zoomed_in else 20
+    overpass_query_timeout = 12 if is_zoomed_in else 20
+
+    # Query a larger neighborhood for zoomed-in views so users see nearby
+    # trunk routes instead of an empty viewport when lines are just outside.
+    qxmin, qymin, qxmax, qymax = xmin, ymin, xmax, ymax
+    if is_zoomed_in:
+        pad_x = max(bbox_width * 2.0, 0.30)
+        pad_y = max(bbox_height * 2.0, 0.30)
+        qxmin = max(-180.0, xmin - pad_x)
+        qymin = max(-90.0, ymin - pad_y)
+        qxmax = min(180.0, xmax + pad_x)
+        qymax = min(90.0, ymax + pad_y)
+
     ql = (
         f"[out:json][timeout:{overpass_query_timeout}];"
         f"("
-        f"  way['telecom'='line']({ymin},{xmin},{ymax},{xmax});"
-        f"  way['communication'='line']({ymin},{xmin},{ymax},{xmax});"
-        f"  way['communication'='fibre']({ymin},{xmin},{ymax},{xmax});"
-        f"  way['man_made'='cable']['location'!='underwater']({ymin},{xmin},{ymax},{xmax});"
-        f"  way['cable'='fiber']({ymin},{xmin},{ymax},{xmax});"
-        f"  way['utility'='telecom']({ymin},{xmin},{ymax},{xmax});"
+        f"  way['telecom'='line']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  way['communication'='line']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  way['communication'='fibre']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  way['communication'='fiber']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  way['man_made'='cable']['location'!='underwater']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  way['cable'='fiber']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  way['cable'='fibre']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  way['utility'='telecom']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  relation['telecom'='line']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  relation['communication'='line']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  relation['communication'='fibre']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  relation['communication'='fiber']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  relation['cable'='fiber']({qymin},{qxmin},{qymax},{qxmax});"
+        f"  relation['cable'='fibre']({qymin},{qxmin},{qymax},{qxmax});"
         f");"
         f"out geom;"
     )
@@ -1048,8 +1119,8 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
         "User-Agent": "avalon-siting/1.0 (+https://github.com/bpachter/avalon)",
         "Accept": "application/json",
     }
-    overpass_http_timeout = 4 if is_zoomed_in else 20
-    overpass_endpoints = _OVERPASS_ENDPOINTS[:1] if is_zoomed_in else _OVERPASS_ENDPOINTS
+    overpass_http_timeout = 6 if is_zoomed_in else 8
+    overpass_endpoints = _OVERPASS_ENDPOINTS
     for ep in overpass_endpoints:
         try:
             # Tuple timeout = (connect_timeout, read_timeout)
@@ -1075,6 +1146,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
             "_meta": {
                 "layer": "fiber_lines", "source": "OpenStreetMap (Overpass API)",
                 "returned": 0, "limit": limit, "live": True,
+                "fallback_used": True,
                 "warning": primary_warning or f"Overpass unreachable ({last_err}); try again in a minute",
             },
         }
@@ -1082,7 +1154,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     feats: list[dict] = list(merged)
     seen = set(merged_seen)
     for el in data.get("elements", []):
-        if el.get("type") != "way":
+        if el.get("type") not in ("way", "relation"):
             continue
         geom = el.get("geometry") or []
         if len(geom) < 2:

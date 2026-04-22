@@ -909,14 +909,46 @@ export default function SitingPanel() {
     })
   }
 
-  // refetch enabled overlays when bbox changes (debounced via dependency)
+  // refetch enabled overlays only when zoom threshold changes OR user pans significantly.
+  // This prevents endless requests on every tiny pan/zoom while still covering new features.
+  const prevZoomThresholdRef = useRef<number | null>(null)
+  const lastFetchBboxRef = useRef<[number, number, number, number] | null>(null)
+  
   useEffect(() => {
     if (!mapReady || !bbox) return
+    
+    // Determine which zoom threshold we're in (affects request limits for fiber/parcels)
+    const fiberThreshold = zoom < 6 ? 0 : zoom < 8 ? 1 : 2
+    const parcelThreshold = zoom < 13.5 ? 0 : zoom < 14.5 ? 1 : 2
+    const maxThreshold = Math.max(fiberThreshold, parcelThreshold)
+    
+    const prevThreshold = prevZoomThresholdRef.current
+    const lastBbox = lastFetchBboxRef.current
+    
+    // Check if we've panned significantly (> 30% of current viewport width/height)
+    const bboxWidth = bbox[2] - bbox[0]
+    const bboxHeight = bbox[3] - bbox[1]
+    const panThreshold = Math.max(bboxWidth, bboxHeight) * 0.3
+    
+    const significantPan = lastBbox && (
+      Math.abs(bbox[0] - lastBbox[0]) > panThreshold ||
+      Math.abs(bbox[1] - lastBbox[1]) > panThreshold
+    )
+    
+    const shouldReload = prevThreshold === null ||
+                        prevThreshold !== maxThreshold ||
+                        significantPan
+    
+    if (!shouldReload) return
+    
+    prevZoomThresholdRef.current = maxThreshold
+    lastFetchBboxRef.current = bbox
+    
     for (const [key, on] of Object.entries(enabledLayers)) {
       if (on) reloadOverlay(key)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bbox?.[0], bbox?.[1], bbox?.[2], bbox?.[3], mapReady])
+  }, [zoom, bbox?.[0], bbox?.[1], bbox?.[2], bbox?.[3], mapReady, enabledLayers])
 
   // ── fly to selected state ─────────────────────────────────────────────
   useEffect(() => {

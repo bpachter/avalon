@@ -703,10 +703,12 @@ export default function SitingPanel() {
       zoom < 13.5 ? 350 :
       zoom < 14.5 ? 700 :
       1200
+    // For fiber: INVERSE of parcels. Higher zoom = smaller bbox = need FEWER features.
+    // This keeps response times fast even at high zoom levels.
     const fiberLimit =
-      zoom < 6 ? 500 :
+      zoom < 6 ? 1400 :
       zoom < 8 ? 900 :
-      1400
+      500
     const limit =
       lyr.key.endsWith('_parcels') ? parcelLimit :
       lyr.key === 'fiber_lines' ? fiberLimit :

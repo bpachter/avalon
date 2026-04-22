@@ -362,21 +362,17 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "line", "color": "#a07a40", "min_zoom": 4,
         "source": "HIFLD", "max_records": 4000,
     },
-    # Fiber lines are served by an internal handler that queries a live
-    # ArcGIS global optical-fiber feed first, then falls back to OpenStreetMap
-    # Overpass when the ArcGIS source is unavailable. Keeping this internal preserves a
-    # single stable layer key for the frontend while allowing multi-source
-    # resilience under one toggle.
     "fiber_lines": {
-        "name": "Fiber optic cables", "group": "Connectivity",
-        # Served by in-process handler; URL is intentionally internal.
+        "name": "Fiber optic lines", "group": "Connectivity",
         "url": "__INTERNAL__/fiber_lines",
         "where": "1=1", "out_fields": "*",
-        "geom": "line", "color": "#38bdf8", "min_zoom": 4,
-        "source": "Global Optical Fiber (primary) + OpenStreetMap fallback",
-        "max_records": 50000, "page_size": 5000,
+        "geom": "line", "color": "#ffa726", "min_zoom": 4,
+        "source": "Global Fiber / OSM",
+        "max_records": 5000, "page_size": 1000,
         "internal": True,
     },
+    # Fiber optic lines are temporarily hidden from the app. Keep the internal
+    # implementation below for quick re-enable when data quality stabilizes.
     "fema_flood_zones": {
         "name": "FEMA flood hazard zones", "group": "Hazards & environment",
         "url": "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
@@ -1941,7 +1937,6 @@ def siting_parcel_detail(lat: float, lon: float, radius_mi: float = 5.0):
         ("natgas_pipelines", "Nearest natural gas pipeline"),
         ("power_plants",     "Nearest power plant"),
         ("substations",      "Nearest substation"),
-        ("fiber_lines",      "Nearest fiber optic cable"),
     ]
     out: dict = {"lat": lat, "lon": lon, "radius_mi": radius_mi, "results": []}
     for key, label in targets:
@@ -1951,12 +1946,7 @@ def siting_parcel_detail(lat: float, lon: float, radius_mi: float = 5.0):
         # Internal (non-ArcGIS) layers \u2014 dispatch to their in-process handler
         # and treat the returned FeatureCollection the same way as ArcGIS output.
         if cfg.get("internal"):
-            if key == "fiber_lines":
-                data = _fiber_lines_fc(bbox, limit=2000, state=None)
-                if isinstance(data, JSONResponse):
-                    data = {}
-            else:
-                data = {}
+            data = {}
         else:
             url = _arcgis_query_url(cfg, bbox, page_size=2000, offset=0)
             try:

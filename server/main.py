@@ -606,10 +606,20 @@ def _bbox_intersection(
 
 
 def _state_plus_neighbors_bbox(state_code: str) -> tuple[float, float, float, float] | None:
+    """Return bbox covering only the selected state.
+
+    Previously this expanded to the state + adjacent states to preserve edge
+    effects, but Paces (and our siting workflow) constrains everything to the
+    selected state. Single-state clipping yields ~5–10× smaller payloads and
+    keeps overlays loading at zoom levels where the full multi-state region
+    would otherwise time out.
+    """
     st = state_code.upper().strip()
-    states = [st, *STATE_BORDER_MAP.get(st, [])]
-    boxes = [US_STATE_BBOX[s] for s in states if s in US_STATE_BBOX]
-    return _bbox_union(boxes)
+    return US_STATE_BBOX.get(st)
+
+
+def _state_only_bbox(state_code: str) -> tuple[float, float, float, float] | None:
+    return US_STATE_BBOX.get(state_code.upper().strip())
 
 
 def _resilient_get(url: str, *, timeout: int = 30, retries: int = 3):
@@ -664,25 +674,29 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     Overpass directly (CORS-safe, cacheable at the Railway edge).
     """
     xmin, ymin, xmax, ymax = bbox_t
-    # Clip to state-region to keep payloads reasonable even at zoom-4.
+    # Clip to selected state to keep Overpass payloads small.
     if state:
-        region = _state_plus_neighbors_bbox(state)
+        region = _state_only_bbox(state)
         if region:
             clipped = _bbox_intersection(bbox_t, region)
             if clipped is None:
                 return {"type": "FeatureCollection", "features": [],
                         "_meta": {"layer": "fiber_lines", "returned": 0, "source": "OpenStreetMap",
-                                  "state": state, "clipped_to_state_region": True, "live": True}}
+                                  "state": state, "clipped_to_state": True, "live": True}}
             xmin, ymin, xmax, ymax = clipped
-    # Overpass query: all ways tagged as fiber / telecom / communication lines.
-    # Bounding box format Overpass expects: (south, west, north, east).
+    # Overpass query: union of all known fiber/telecom backbone tags. The
+    # `communication=line` tag returns most NC long-haul routes; the others
+    # catch regional variations and underground/aerial cables. Keep
+    # underwater submarine cables out (location!='underwater').
     ql = (
         f"[out:json][timeout:25];"
         f"("
         f"  way['telecom'='line']({ymin},{xmin},{ymax},{xmax});"
         f"  way['communication'='line']({ymin},{xmin},{ymax},{xmax});"
+        f"  way['communication'='fibre']({ymin},{xmin},{ymax},{xmax});"
         f"  way['man_made'='cable']['location'!='underwater']({ymin},{xmin},{ymax},{xmax});"
         f"  way['cable'='fiber']({ymin},{xmin},{ymax},{xmax});"
+        f"  way['utility'='telecom']({ymin},{xmin},{ymax},{xmax});"
         f");"
         f"out geom;"
     )
@@ -902,13 +916,13 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             return _county_opposition_fc(bbox_t, limit=limit, state=state)
 
     extra_where: str | None = None
-    # Constrain high-volume infra layers to selected state + border states.
-    if state and layer_key in {
-        "transmission", "transmission_duke", "natgas_pipelines",
-        "crude_oil_pipelines", "petroleum_pipelines", "hgl_pipelines",
-        "substations", "fema_flood_zones", "usfws_wetlands",
-    }:
-        state_region = _state_plus_neighbors_bbox(state)
+    # Constrain ALL geographic layers to selected state. Single-state clipping
+    # (no border states) keeps payload sizes manageable and matches the Paces
+    # workflow where layers are scoped to one jurisdiction at a time. Layers
+    # listed in CLIP_EXEMPT are intentionally not clipped.
+    CLIP_EXEMPT: set[str] = set()
+    if state and layer_key not in CLIP_EXEMPT:
+        state_region = _state_only_bbox(state)
         if state_region:
             clipped = _bbox_intersection(bbox_t, state_region)
             if clipped is None:
@@ -921,7 +935,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
                         "returned": 0,
                         "limit": 0,
                         "bbox": bbox,
-                        "clipped_to_state_region": True,
+                        "clipped_to_state": True,
                         "live": True,
                     },
                 }

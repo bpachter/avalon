@@ -260,6 +260,14 @@ export default function SitingPanel() {
     layerId: string
     fn: (e: any) => void
   }>>>(new Map())
+  // Per-overlay fetch-generation counter. Incremented every time a layer is
+  // toggled off, removed, or re-fetched so in-flight responses for an older
+  // generation are discarded. Without this, a slow upstream can re-add a
+  // layer the user already deselected.
+  const overlayGenRef = useRef<Map<string, number>>(new Map())
+  // Per-overlay enabled state mirror so async fetches can short-circuit
+  // even before the next render commits the state change.
+  const enabledRef = useRef<Record<string, boolean>>({})
   const [mapReady, setMapReady] = useState(false)
   const [bbox, setBbox] = useState<[number, number, number, number] | null>(null)
 
@@ -350,6 +358,7 @@ export default function SitingPanel() {
             next[l.key] = prev[l.key] ?? defaultsOn.has(l.key)
           }
         }
+        enabledRef.current = next
         return next
       })
     }).catch(e => setError(String(e)))
@@ -508,6 +517,10 @@ export default function SitingPanel() {
 
   const removeOverlay = useCallback((key: string) => {
     const map = mapRef.current
+    // Bump generation so any in-flight reload for this key is dropped
+    // when it lands. Survives a missing map (e.g. style swap mid-flight).
+    overlayGenRef.current.set(key, (overlayGenRef.current.get(key) ?? 0) + 1)
+    enabledRef.current[key] = false
     if (!map) return
     const SRC = `ovl-${key}-src`
     const LYR = `ovl-${key}-lyr`
@@ -543,13 +556,12 @@ export default function SitingPanel() {
       return
     }
     setLayerStatus(s => ({ ...s, [key]: 'loading' }))
-    // Send active state for heavy infra overlays so API can bound to selected+border states.
-    const stateFilter = [
-      'transmission', 'transmission_duke', 'power_plants', 'power_plants_duke',
-      'natgas_pipelines', 'crude_oil_pipelines', 'petroleum_pipelines', 'hgl_pipelines',
-    ].includes(key)
-      ? activeState
-      : null
+    // Always send the active state — the backend clips every layer to the
+    // selected state's bbox so heavy overlays load quickly even at zoom-out.
+    const stateFilter: string | null = activeState || null
+    // Bump generation; if it changes before we land, discard the response.
+    const myGen = (overlayGenRef.current.get(key) ?? 0) + 1
+    overlayGenRef.current.set(key, myGen)
     // No artificial cap on visible features — backend max_records bounds the
     // payload. We rely on state-region clipping in the proxy to keep payloads
     // sane while still rendering everything in the visible viewport.
@@ -585,6 +597,11 @@ export default function SitingPanel() {
     const SRC = `ovl-${key}-src`
     const LYR = `ovl-${key}-lyr`
     const LYR_FILL = `ovl-${key}-fill`
+    // Drop stale responses: if generation moved on (e.g. user toggled the
+    // layer off, or switched state mid-fetch) abandon this payload so we
+    // don't paint a layer the user has already deselected.
+    if (overlayGenRef.current.get(key) !== myGen) return
+    if (enabledRef.current[key] === false) return
     if (map.getSource(SRC)) {
       ;(map.getSource(SRC) as maplibregl.GeoJSONSource).setData(data as any)
     } else {
@@ -730,6 +747,7 @@ export default function SitingPanel() {
   function toggleLayer(key: string) {
     setEnabledLayers(prev => {
       const next = { ...prev, [key]: !prev[key] }
+      enabledRef.current[key] = next[key]
       if (next[key]) reloadOverlay(key)
       else removeOverlay(key)
       return next
@@ -768,9 +786,13 @@ export default function SitingPanel() {
           changed = true
         }
       }
+      enabledRef.current = next
       return changed ? next : prev
     })
-    // Force enabled overlays to re-fetch with new state filter
+    // State changed \u2014 every enabled overlay must re-fetch with the new\n    // state filter. Bump generations on all of them so any in-flight\n    // responses for the old state are dropped, then trigger reload.
+    for (const k of Object.keys(enabledRef.current)) {
+      overlayGenRef.current.set(k, (overlayGenRef.current.get(k) ?? 0) + 1)
+    }
     setTimeout(() => {
       for (const [key, on] of Object.entries(enabledLayers)) {
         if (on && !(key.endsWith('_parcels') && key !== activeParcelKey)) {

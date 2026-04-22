@@ -340,6 +340,32 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "polygon", "color": "#a0a8b4", "min_zoom": 6,
         "source": "US Census TIGERweb", "max_records": 2500, "page_size": 500,
     },
+    # Always-on outline of the active state. Renders the TIGERweb state
+    # polygon as a thick line so users can immediately see which jurisdiction
+    # the layers are scoped to. Defaults ON in the client.
+    "state_boundary": {
+        "name": "State boundary", "group": "Boundaries",
+        "url": "__INTERNAL__/state_boundary",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#7dd3fc", "style": "outline",
+        "min_zoom": 0,
+        "source": "US Census TIGERweb (States)",
+        "max_records": 1, "page_size": 1,
+        "internal": True,
+    },
+    # PeeringDB facilities — datacenter / fiber POPs. Best open proxy for
+    # "where the fiber actually meets the buildings" since OSM long-haul
+    # routes are sparse in the US. Free, public API, no auth.
+    "fiber_pops": {
+        "name": "Fiber POPs (datacenters)", "group": "Connectivity",
+        "url": "__INTERNAL__/fiber_pops",
+        "where": "1=1", "out_fields": "*",
+        "geom": "point", "color": "#22d3ee",
+        "min_zoom": 4,
+        "source": "PeeringDB",
+        "max_records": 5000, "page_size": 5000,
+        "internal": True,
+    },
     # Datacenter opposition counties — rendered red. Uses our curated list
     # of counties with documented public opposition to datacenters (moved
     # from moratoriums in a separate endpoint). Served internally by joining
@@ -775,7 +801,141 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     }
 
 
-# County boundary service — HIFLD `Counties_v1` mirrors the Census TIGER
+# ── State boundary (always-on overlay) ─────────────────────────────────
+# TIGERweb States layer (CONUS + AK/HI/PR). Cached per state to avoid
+# hammering the upstream on every map move.
+_TIGER_STATES = (
+    "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/0"
+)
+_STATE_BOUNDARY_CACHE: dict[str, dict] = {}
+
+
+def _state_boundary_fc(state: str | None):
+    """Return the polygon outline of `state` from TIGERweb. Cached in-process."""
+    if not state:
+        return {"type": "FeatureCollection", "features": [],
+                "_meta": {"layer": "state_boundary", "returned": 0, "live": True,
+                          "warning": "state required"}}
+    st = state.upper()
+    cached = _STATE_BOUNDARY_CACHE.get(st)
+    if cached is not None:
+        return cached
+    import requests as _rq
+    params = {
+        "where": f"STUSAB='{st}'",
+        "outFields": "STATE,STUSAB,NAME,GEOID",
+        "f": "geojson",
+        "outSR": 4326,
+        "returnGeometry": "true",
+    }
+    fc: dict = {"type": "FeatureCollection", "features": []}
+    try:
+        r = _rq.get(_TIGER_STATES + "/query", params=params,
+                    headers={"User-Agent": "avalon-siting/1.0"}, timeout=20)
+        if r.status_code == 200:
+            fc = r.json() or fc
+    except Exception:
+        pass
+    fc.setdefault("type", "FeatureCollection")
+    fc.setdefault("features", [])
+    fc["_meta"] = {
+        "layer": "state_boundary", "name": "State boundary",
+        "source": "US Census TIGERweb (States)", "group": "Boundaries",
+        "geom": "polygon", "color": "#7dd3fc", "style": "outline",
+        "min_zoom": 0, "returned": len(fc.get("features", [])),
+        "state": st, "live": True,
+    }
+    _STATE_BOUNDARY_CACHE[st] = fc
+    return fc
+
+
+# ── PeeringDB facilities ("Fiber POPs") ───────────────────────────────
+# PeeringDB's facility list is the best free, public proxy for fiber
+# concentration points (datacenters / IXP sites where backbone networks
+# physically interconnect). Far richer than OSM long-haul ways for US
+# coverage. Cached for 24 hours; filtered to bbox client-side.
+_PEERINGDB_URL = "https://www.peeringdb.com/api/fac"
+_PEERINGDB_CACHE: dict = {"data": None, "fetched": 0.0}
+_PEERINGDB_TTL_SEC = 24 * 3600
+
+
+def _peeringdb_facilities_us() -> list[dict]:
+    import time as _t
+    import requests as _rq
+    now = _t.time()
+    cached = _PEERINGDB_CACHE.get("data")
+    if cached is not None and (now - _PEERINGDB_CACHE.get("fetched", 0.0)) < _PEERINGDB_TTL_SEC:
+        return cached
+    try:
+        r = _rq.get(_PEERINGDB_URL, params={"country": "US"},
+                    headers={"User-Agent": "avalon-siting/1.0"}, timeout=30)
+        if r.status_code == 200:
+            facs = r.json().get("data", []) or []
+            _PEERINGDB_CACHE["data"] = facs
+            _PEERINGDB_CACHE["fetched"] = now
+            return facs
+    except Exception:
+        pass
+    return cached or []
+
+
+def _fiber_pops_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
+    xmin, ymin, xmax, ymax = bbox_t
+    if state:
+        region = _state_only_bbox(state)
+        if region:
+            clipped = _bbox_intersection(bbox_t, region)
+            if clipped is None:
+                return {"type": "FeatureCollection", "features": [],
+                        "_meta": {"layer": "fiber_pops", "returned": 0, "live": True,
+                                  "state": state, "clipped_to_state": True}}
+            xmin, ymin, xmax, ymax = clipped
+    st = state.upper() if state else None
+    feats: list[dict] = []
+    for f in _peeringdb_facilities_us():
+        lat = f.get("latitude")
+        lon = f.get("longitude")
+        if lat is None or lon is None:
+            continue
+        try:
+            lat = float(lat); lon = float(lon)
+        except Exception:
+            continue
+        if not (xmin <= lon <= xmax and ymin <= lat <= ymax):
+            continue
+        if st and (f.get("state") or "").upper() != st:
+            continue
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "peeringdb_id": f.get("id"),
+                "name": f.get("name"),
+                "org": f.get("org_name"),
+                "city": f.get("city"),
+                "state": f.get("state"),
+                "address": f.get("address1"),
+                "website": f.get("website"),
+                "networks": f.get("net_count"),
+            },
+        })
+        if len(feats) >= limit:
+            break
+    return {
+        "type": "FeatureCollection",
+        "features": feats,
+        "_meta": {
+            "layer": "fiber_pops", "name": "Fiber POPs (datacenters)",
+            "source": "PeeringDB", "group": "Connectivity",
+            "geom": "point", "color": "#22d3ee", "min_zoom": 4,
+            "returned": len(feats), "limit": limit,
+            "bbox": f"{xmin},{ymin},{xmax},{ymax}",
+            "state": state, "live": True,
+        },
+    }
+
+
+
 # polygons but is more reliable than tigerweb.geo.census.gov from Railway.
 # Used by the opposition-county layer to render flagged counties red.
 _HIFLD_COUNTIES = f"{_HIFLD2}/Counties_v1/FeatureServer/0"
@@ -914,6 +1074,10 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             return _fiber_lines_fc(bbox_t, limit=limit, state=state)
         if layer_key == "county_opposition":
             return _county_opposition_fc(bbox_t, limit=limit, state=state)
+        if layer_key == "state_boundary":
+            return _state_boundary_fc(state)
+        if layer_key == "fiber_pops":
+            return _fiber_pops_fc(bbox_t, limit=limit, state=state)
 
     extra_where: str | None = None
     # Constrain ALL geographic layers to selected state. Single-state clipping

@@ -349,7 +349,7 @@ export default function SitingPanel() {
       setLayers(r.layers)
       setEnabledLayers(prev => {
         const next: Record<string, boolean> = {}
-        const defaultsOn = new Set(['transmission', 'natgas_pipelines'])
+        const defaultsOn = new Set(['state_boundary', 'transmission', 'natgas_pipelines'])
         for (const l of r.layers) {
           if (l.key === 'transmission_duke') {
             // merged into transmission for a single combined toggle
@@ -634,17 +634,24 @@ export default function SitingPanel() {
         }, beforeId)
       } else {
         // polygon
-        map.addLayer({
-          id: LYR_FILL, type: 'fill', source: SRC,
-          paint: { 'fill-color': lyr.color, 'fill-opacity': 0.10 },
-        }, beforeId)
+        const isOutline = lyr.style === 'outline'
+        if (!isOutline) {
+          map.addLayer({
+            id: LYR_FILL, type: 'fill', source: SRC,
+            paint: { 'fill-color': lyr.color, 'fill-opacity': 0.10 },
+          }, beforeId)
+        }
         // Note: previously we drew a red moratorium fill on top of
         // county_subdivisions, but that filter joined county-level rows
         // against minor-civil-division features and never matched. Opposition
         // counties are now drawn by the dedicated `county_opposition` layer.
         map.addLayer({
           id: LYR, type: 'line', source: SRC,
-          paint: { 'line-color': lyr.color, 'line-width': 0.9, 'line-opacity': 0.85 },
+          paint: {
+            'line-color': lyr.color,
+            'line-width': isOutline ? 2.6 : 0.9,
+            'line-opacity': isOutline ? 0.95 : 0.85,
+          },
         }, beforeId)
         // Parcel layers: hover-highlight + click → popup (Paces-style).
         // Pattern matches the per-state parcel keys (nc_parcels, sc_parcels, …).

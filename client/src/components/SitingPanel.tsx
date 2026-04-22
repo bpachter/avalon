@@ -911,6 +911,7 @@ export default function SitingPanel() {
 
   // refetch enabled overlays only when zoom threshold changes OR user pans significantly.
   // This prevents endless requests on every tiny pan/zoom while still covering new features.
+  // Use refs to track state without creating dependency array thrashing.
   const prevZoomThresholdRef = useRef<number | null>(null)
   const lastFetchBboxRef = useRef<[number, number, number, number] | null>(null)
   
@@ -925,10 +926,10 @@ export default function SitingPanel() {
     const prevThreshold = prevZoomThresholdRef.current
     const lastBbox = lastFetchBboxRef.current
     
-    // Check if we've panned significantly (> 30% of current viewport width/height)
+    // Check if we've panned significantly (> 20% of current viewport width/height)
     const bboxWidth = bbox[2] - bbox[0]
     const bboxHeight = bbox[3] - bbox[1]
-    const panThreshold = Math.max(bboxWidth, bboxHeight) * 0.3
+    const panThreshold = Math.max(bboxWidth, bboxHeight) * 0.2
     
     const significantPan = lastBbox && (
       Math.abs(bbox[0] - lastBbox[0]) > panThreshold ||
@@ -944,11 +945,12 @@ export default function SitingPanel() {
     prevZoomThresholdRef.current = maxThreshold
     lastFetchBboxRef.current = bbox
     
-    for (const [key, on] of Object.entries(enabledLayers)) {
+    // Use the ref to avoid dependency array issues, reload all currently-enabled layers
+    for (const [key, on] of Object.entries(enabledRef.current)) {
       if (on) reloadOverlay(key)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoom, bbox?.[0], bbox?.[1], bbox?.[2], bbox?.[3], mapReady, enabledLayers])
+  }, [zoom, bbox?.[0], bbox?.[1], bbox?.[2], bbox?.[3], mapReady])
 
   // ── fly to selected state ─────────────────────────────────────────────
   useEffect(() => {

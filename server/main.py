@@ -361,19 +361,19 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "geom": "line", "color": "#a07a40", "min_zoom": 4,
         "source": "HIFLD", "max_records": 4000,
     },
-    # NC Broadband's NC OneMap service was deprecated (2025 reorg); replaced
-    # here with a national long-haul fiber layer pulled from OpenStreetMap
-    # via Overpass API (see /api/siting/fiber_lines below). The registry
-    # entry is exposed through the same live-layers list so the map
-    # toggle UX stays consistent.
+    # Fiber lines are served by an internal handler that queries a live
+    # ArcGIS global optical-fiber feed first, then falls back to OpenStreetMap
+    # Overpass when the ArcGIS source is unavailable. Keeping this internal preserves a
+    # single stable layer key for the frontend while allowing multi-source
+    # resilience under one toggle.
     "fiber_lines": {
         "name": "Fiber optic cables", "group": "Connectivity",
-        # This layer is served by our in-process Overpass proxy; the proxy
-        # returns GeoJSON directly instead of querying an ArcGIS endpoint.
+        # Served by in-process handler; URL is intentionally internal.
         "url": "__INTERNAL__/fiber_lines",
         "where": "1=1", "out_fields": "*",
         "geom": "line", "color": "#38bdf8", "min_zoom": 6,
-        "source": "OpenStreetMap", "max_records": 50000, "page_size": 5000,
+        "source": "Global Optical Fiber (primary) + OpenStreetMap fallback",
+        "max_records": 50000, "page_size": 5000,
         "internal": True,
     },
     "fema_flood_zones": {
@@ -785,13 +785,10 @@ _OVERPASS_ENDPOINTS = [
 
 
 def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
-    """OpenStreetMap-sourced long-haul fiber routes inside bbox.
+    """Long-haul fiber routes inside bbox with ArcGIS-first sourcing.
 
-    Paces uses a curated paid fiber layer; the best open-data analogue is
-    OSM's `telecom=line` / `man_made=cable` (telecom) tagging, which
-    captures the backbone routes that utility-scale siting teams actually
-    care about. Served through our proxy so the browser never talks to
-    Overpass directly (CORS-safe, cacheable at the Railway edge).
+    Primary source: Global Optical Fiber Network ArcGIS service.
+    Fallback source: OpenStreetMap Overpass tags for telecom/fiber routes.
     """
     xmin, ymin, xmax, ymax = bbox_t
     # Clip to selected state to keep Overpass payloads small.
@@ -804,6 +801,82 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
                         "_meta": {"layer": "fiber_lines", "returned": 0, "source": "OpenStreetMap",
                                   "state": state, "clipped_to_state": True, "live": True}}
             xmin, ymin, xmax, ymax = clipped
+    # First try ArcGIS global optical-fiber feed, then fall back to OSM
+    # Overpass if ArcGIS is unavailable or empty in this viewport.
+    primary_url = (
+        "https://services1.arcgis.com/RTK5Unh1Z71JKIiR/arcgis/rest/services/"
+        "Global_Optical_Fiber_Network/FeatureServer/0/query"
+    )
+    primary_feats: list[dict] = []
+    primary_seen: set[str] = set()
+    primary_warning: str | None = None
+    try:
+        from urllib.parse import urlencode as _urlencode
+
+        page_size = min(max(500, min(limit, 2000)), 2000)
+        offset = 0
+        while len(primary_feats) < limit:
+            params = {
+                "where": "1=1",
+                "outFields": "*",
+                "f": "geojson",
+                "outSR": 4326,
+                "resultOffset": offset,
+                "resultRecordCount": min(page_size, limit - len(primary_feats)),
+                "returnGeometry": "true",
+                "geometry": f"{xmin},{ymin},{xmax},{ymax}",
+                "geometryType": "esriGeometryEnvelope",
+                "inSR": 4326,
+                "spatialRel": "esriSpatialRelIntersects",
+            }
+            url = primary_url + "?" + _urlencode(params)
+            r = _resilient_get(url, timeout=30, retries=3)
+            if r.status_code != 200:
+                raise RuntimeError(f"Primary fiber source HTTP {r.status_code}")
+            data = r.json()
+            page_feats = data.get("features") or []
+            for f in page_feats:
+                if not isinstance(f, dict):
+                    continue
+                sig = _feature_sig(f)
+                if sig in primary_seen:
+                    continue
+                primary_seen.add(sig)
+                props = dict(f.get("properties") or {})
+                props["source_dataset"] = "Global Optical Fiber Network"
+                f["properties"] = props
+                primary_feats.append(f)
+                if len(primary_feats) >= limit:
+                    break
+            exceeded = bool(data.get("exceededTransferLimit"))
+            if len(page_feats) == 0 or not exceeded:
+                break
+            offset += page_size
+    except Exception as exc:  # noqa: BLE001
+        primary_warning = f"Primary fiber source unavailable ({type(exc).__name__}: {exc})"
+
+    if primary_feats:
+        return {
+            "type": "FeatureCollection",
+            "features": primary_feats,
+            "_meta": {
+                "layer": "fiber_lines",
+                "name": "Fiber optic cables",
+                "source": "Global Optical Fiber Network (ArcGIS)",
+                "group": "Connectivity",
+                "geom": "line",
+                "color": "#38bdf8",
+                "min_zoom": 6,
+                "returned": len(primary_feats),
+                "limit": limit,
+                "bbox": f"{xmin},{ymin},{xmax},{ymax}",
+                "state": state,
+                "live": True,
+                "fallback_used": False,
+                "warning": primary_warning,
+            },
+        }
+
     # Overpass query: union of all known fiber/telecom backbone tags. The
     # `communication=line` tag returns most NC long-haul routes; the others
     # catch regional variations and underground/aerial cables. Keep
@@ -847,7 +920,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
             "_meta": {
                 "layer": "fiber_lines", "source": "OpenStreetMap (Overpass API)",
                 "returned": 0, "limit": limit, "live": True,
-                "warning": f"Overpass unreachable ({last_err}); try again in a minute",
+                "warning": primary_warning or f"Overpass unreachable ({last_err}); try again in a minute",
             },
         }
 
@@ -891,6 +964,8 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
             "returned": len(feats), "limit": limit,
             "bbox": f"{xmin},{ymin},{xmax},{ymax}",
             "state": state, "live": True,
+            "fallback_used": True,
+            "warning": primary_warning,
         },
     }
 

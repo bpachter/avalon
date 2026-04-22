@@ -50,7 +50,10 @@ LAYERS: dict[str, LayerSpec] = {
     "longhaul_fiber": LayerSpec(
         source="hifld",
         layer="longhaul_fiber",
-        url=f"{HIFLD_BASE}/Long_Haul_Fiber_Optic_Cable/FeatureServer/0",
+        # USDHS HIFLD service intermittently resets connections in 2026.
+        # Use a stable public ArcGIS global optical-fiber layer so fiber
+        # factor ingest remains live.
+        url="https://services1.arcgis.com/RTK5Unh1Z71JKIiR/arcgis/rest/services/Global_Optical_Fiber_Network/FeatureServer/0",
         where="1=1",
         out_fields="*",
     ),

@@ -9,6 +9,7 @@ import os
 import sys
 import traceback
 import hashlib
+import time
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -371,7 +372,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # Served by in-process handler; URL is intentionally internal.
         "url": "__INTERNAL__/fiber_lines",
         "where": "1=1", "out_fields": "*",
-        "geom": "line", "color": "#38bdf8", "min_zoom": 6,
+        "geom": "line", "color": "#38bdf8", "min_zoom": 4,
         "source": "Global Optical Fiber (primary) + OpenStreetMap fallback",
         "max_records": 50000, "page_size": 5000,
         "internal": True,
@@ -783,6 +784,118 @@ _OVERPASS_ENDPOINTS = [
     "https://lz4.overpass-api.de/api/interpreter",
 ]
 
+_FIBER_SEARCH_URL = "https://www.arcgis.com/sharing/rest/search"
+_FIBER_SOURCE_CACHE: dict[str, dict] = {}
+_FIBER_CACHE_TTL_SEC = 6 * 60 * 60
+
+
+def _norm_arcgis_layer_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    u = url.rstrip("/")
+    if "/FeatureServer/" in u or "/MapServer/" in u:
+        return u
+    if u.endswith("/FeatureServer") or u.endswith("/MapServer"):
+        return u + "/0"
+    return None
+
+
+def _state_fiber_sources(state: str, bbox_t: tuple[float, float, float, float], *, max_sources: int = 3) -> list[str]:
+    st = state.upper().strip()
+    now = time.time()
+    cached = _FIBER_SOURCE_CACHE.get(st)
+    if cached and (now - float(cached.get("ts", 0))) < _FIBER_CACHE_TTL_SEC:
+        return list(cached.get("urls") or [])
+
+    full = _STATE_FULL_NAME.get(st, st)
+    queries = [
+        f"fiber optic {full} type:\"Feature Service\"",
+        f"fibre optic {full} type:\"Feature Service\"",
+        f"optical fiber {full} type:\"Map Service\"",
+    ]
+
+    import requests as _rq
+    found: list[str] = []
+    seen: set[str] = set()
+    for q in queries:
+        if len(found) >= max_sources:
+            break
+        try:
+            r = _rq.get(_FIBER_SEARCH_URL, params={"q": q, "f": "json", "num": 12}, timeout=15)
+            if r.status_code != 200:
+                continue
+            data = r.json() or {}
+            for it in data.get("results") or []:
+                if len(found) >= max_sources:
+                    break
+                layer_url = _norm_arcgis_layer_url(it.get("url"))
+                if not layer_url or layer_url in seen:
+                    continue
+                seen.add(layer_url)
+                try:
+                    qr = _rq.get(
+                        layer_url + "/query",
+                        params={
+                            "where": "1=1",
+                            "returnCountOnly": "true",
+                            "f": "json",
+                            "geometry": f"{bbox_t[0]},{bbox_t[1]},{bbox_t[2]},{bbox_t[3]}",
+                            "geometryType": "esriGeometryEnvelope",
+                            "inSR": 4326,
+                            "spatialRel": "esriSpatialRelIntersects",
+                        },
+                        timeout=12,
+                    )
+                    if qr.status_code != 200:
+                        continue
+                    cnt = int((qr.json() or {}).get("count") or 0)
+                    if cnt <= 0:
+                        continue
+                    found.append(layer_url)
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    _FIBER_SOURCE_CACHE[st] = {"ts": now, "urls": found}
+    return found
+
+
+def _arcgis_fiber_feats(source_url: str, bbox_t: tuple[float, float, float, float], *, limit: int) -> list[dict]:
+    cfg = {
+        "url": source_url,
+        "where": "1=1",
+        "out_fields": "*",
+        "simplify_min_offset": 0.00004,
+        "geometry_precision": 6,
+    }
+    feats: list[dict] = []
+    seen: set[str] = set()
+    page_size = min(max(200, min(limit, 1200)), 1200)
+    offset = 0
+    while len(feats) < limit:
+        url = _arcgis_query_url(cfg, bbox_t, page_size=min(page_size, limit - len(feats)), offset=offset)
+        r = _resilient_get(url, timeout=25, retries=2)
+        if r.status_code != 200:
+            break
+        data = r.json() or {}
+        page = data.get("features") or []
+        for f in page:
+            if not isinstance(f, dict):
+                continue
+            sig = _feature_sig(f)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            feats.append(f)
+            if len(feats) >= limit:
+                break
+        exceeded = bool(data.get("exceededTransferLimit"))
+        if len(page) == 0 or not exceeded:
+            break
+        offset += page_size
+    return feats
+
 
 def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
     """Long-haul fiber routes inside bbox with ArcGIS-first sourcing.
@@ -801,8 +914,8 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
                         "_meta": {"layer": "fiber_lines", "returned": 0, "source": "OpenStreetMap",
                                   "state": state, "clipped_to_state": True, "live": True}}
             xmin, ymin, xmax, ymax = clipped
-    # First try ArcGIS global optical-fiber feed, then fall back to OSM
-    # Overpass if ArcGIS is unavailable or empty in this viewport.
+    # First try ArcGIS global optical-fiber feed, then supplement with
+    # state-discovered ArcGIS services and OSM when sparse.
     primary_url = (
         "https://services1.arcgis.com/RTK5Unh1Z71JKIiR/arcgis/rest/services/"
         "Global_Optical_Fiber_Network/FeatureServer/0/query"
@@ -855,22 +968,43 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     except Exception as exc:  # noqa: BLE001
         primary_warning = f"Primary fiber source unavailable ({type(exc).__name__}: {exc})"
 
-    # If primary returns only a tiny amount of geometry, supplement it with
-    # OSM long-haul tags so statewide coverage is still useful.
-    sparse_threshold = min(limit, 80)
-    if primary_feats and len(primary_feats) >= sparse_threshold:
+    sparse_threshold = min(limit, 240)
+    merged: list[dict] = list(primary_feats)
+    merged_seen: set[str] = set(primary_seen)
+
+    # Auto-discover state-level ArcGIS fiber services to improve coverage
+    # beyond the global feed, then merge unique features.
+    if state and len(merged) < sparse_threshold:
+        for src in _state_fiber_sources(state, (xmin, ymin, xmax, ymax), max_sources=3):
+            if len(merged) >= limit:
+                break
+            try:
+                extra = _arcgis_fiber_feats(src, (xmin, ymin, xmax, ymax), limit=min(700, limit - len(merged)))
+            except Exception:
+                continue
+            for f in extra:
+                sig = _feature_sig(f)
+                if sig in merged_seen:
+                    continue
+                merged_seen.add(sig)
+                props = dict(f.get("properties") or {})
+                props.setdefault("source_dataset", src)
+                f["properties"] = props
+                merged.append(f)
+
+    if merged and len(merged) >= sparse_threshold:
         return {
             "type": "FeatureCollection",
-            "features": primary_feats,
+            "features": merged,
             "_meta": {
                 "layer": "fiber_lines",
                 "name": "Fiber optic cables",
-                "source": "Global Optical Fiber Network (ArcGIS)",
+                "source": "ArcGIS fiber blend",
                 "group": "Connectivity",
                 "geom": "line",
                 "color": "#38bdf8",
-                "min_zoom": 6,
-                "returned": len(primary_feats),
+                "min_zoom": 4,
+                "returned": len(merged),
                 "limit": limit,
                 "bbox": f"{xmin},{ymin},{xmax},{ymax}",
                 "state": state,
@@ -927,10 +1061,8 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
             },
         }
 
-    feats: list[dict] = []
-    seen = set(primary_seen)
-    if primary_feats:
-        feats.extend(primary_feats)
+    feats: list[dict] = list(merged)
+    seen = set(merged_seen)
     for el in data.get("elements", []):
         if el.get("type") != "way":
             continue
@@ -966,11 +1098,11 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
             break
 
     source_label = (
-        "Global Optical Fiber Network (ArcGIS) + OpenStreetMap (Overpass API)"
-        if primary_feats else
+        "ArcGIS fiber blend + OpenStreetMap (Overpass API)"
+        if merged else
         "OpenStreetMap (Overpass API)"
     )
-    fallback_used = not bool(primary_feats)
+    fallback_used = not bool(merged)
 
     return {
         "type": "FeatureCollection",
@@ -978,7 +1110,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
         "_meta": {
             "layer": "fiber_lines", "name": "Fiber optic cables",
             "source": source_label, "group": "Connectivity",
-            "geom": "line", "color": "#ffa726", "min_zoom": 6,
+            "geom": "line", "color": "#ffa726", "min_zoom": 4,
             "returned": len(feats), "limit": limit,
             "bbox": f"{xmin},{ymin},{xmax},{ymax}",
             "state": state, "live": True,

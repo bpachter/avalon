@@ -64,34 +64,40 @@ const STYLE_SATELLITE: maplibregl.StyleSpecification = _rasterStyle(
   16,
 )
 
-// Hybrid satellite + roads/labels (ESRI World Imagery + ESRI Reference overlay).
+// Hybrid satellite + roads/labels. Uses USGS imagery (government-hosted,
+// reliable) with a CARTO labels-only overlay. Replaces the previous
+// ESRI arcgisonline.com stack which was returning ERR_CONNECTION_RESET
+// for Reference/World_Boundaries_and_Places + Reference/World_Transportation
+// tiles intermittently from GitHub Pages.
 const STYLE_HYBRID: maplibregl.StyleSpecification = {
   version: 8,
   glyphs: 'https://fonts.cartocdn.com/gl/{fontstack}/{range}.pbf',
   sources: {
-    'esri-imagery': {
+    'usgs-imagery': {
       type: 'raster',
       tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
-      maxzoom: 19,
-      attribution: 'Esri, Maxar, Earthstar Geographics',
+      maxzoom: 16,
+      attribution: 'Tiles courtesy of the U.S. Geological Survey',
     },
-    'esri-reference': {
+    'carto-labels': {
       type: 'raster',
       tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+        'https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
+        'https://d.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png',
       ],
       tileSize: 256,
       maxzoom: 19,
-      attribution: 'Esri',
+      attribution: '\u00a9 OpenStreetMap, \u00a9 CARTO',
     },
   },
   layers: [
-    { id: 'esri-imagery-lyr', type: 'raster', source: 'esri-imagery' },
-    { id: 'esri-reference-lyr', type: 'raster', source: 'esri-reference' },
+    { id: 'usgs-imagery-lyr', type: 'raster', source: 'usgs-imagery' },
+    { id: 'carto-labels-lyr', type: 'raster', source: 'carto-labels' },
   ],
 }
 
@@ -189,6 +195,14 @@ function colorForScore(score: number, killed: boolean): string {
 }
 
 const ARCHETYPES: Archetype[] = ['training', 'inference', 'mixed']
+
+// Strip per-state suffixes like " (NC)" / " (SC \u2013 York)" / " (KY \u2013 Jefferson)"
+// from layer display names \u2014 we now expose multiple states and the active
+// state is implicit from the State selector.
+function prettyLayerName(l: LiveLayer): string {
+  if (l.key.endsWith('_parcels')) return 'Parcel outlines'
+  return l.name
+}
 
 const FALLBACK_SAMPLE_SITES: Array<{ site_id: string; lat: number; lon: number; state: string }> = [
   { site_id: 'TX-ABL-001', lat: 32.4487, lon: -99.7331, state: 'TX' },
@@ -539,7 +553,10 @@ export default function SitingPanel() {
     // No artificial cap on visible features — backend max_records bounds the
     // payload. We rely on state-region clipping in the proxy to keep payloads
     // sane while still rendering everything in the visible viewport.
-    const limit = lyr.key.endsWith('_parcels') ? 2000 : 50000
+    const limit =
+      lyr.key.endsWith('_parcels') ? 1500 :
+      lyr.key === 'county_subdivisions' ? 2500 :
+      50000
     let data: any
     if (key === 'transmission') {
       // Merge Duke-owned lines into the base transmission overlay so the UI has
@@ -568,7 +585,6 @@ export default function SitingPanel() {
     const SRC = `ovl-${key}-src`
     const LYR = `ovl-${key}-lyr`
     const LYR_FILL = `ovl-${key}-fill`
-    const LYR_MORATORIUM = `ovl-${key}-moratorium`
     if (map.getSource(SRC)) {
       ;(map.getSource(SRC) as maplibregl.GeoJSONSource).setData(data as any)
     } else {
@@ -605,22 +621,10 @@ export default function SitingPanel() {
           id: LYR_FILL, type: 'fill', source: SRC,
           paint: { 'fill-color': lyr.color, 'fill-opacity': 0.10 },
         }, beforeId)
-        // Light-red highlight for counties with documented opposition
-        if (key === 'county_subdivisions' && moratoriumKeys.length) {
-          const filterMatches: any[] = ['any']
-          for (const c of moratoriums) {
-            filterMatches.push([
-              'all',
-              ['==', ['get', 'STATE_NAME'], c.state],
-              ['==', ['get', 'NAME'], c.county],
-            ])
-          }
-          map.addLayer({
-            id: LYR_MORATORIUM, type: 'fill', source: SRC,
-            filter: filterMatches as any,
-            paint: { 'fill-color': '#ff6b6b', 'fill-opacity': 0.32 },
-          }, beforeId)
-        }
+        // Note: previously we drew a red moratorium fill on top of
+        // county_subdivisions, but that filter joined county-level rows
+        // against minor-civil-division features and never matched. Opposition
+        // counties are now drawn by the dedicated `county_opposition` layer.
         map.addLayer({
           id: LYR, type: 'line', source: SRC,
           paint: { 'line-color': lyr.color, 'line-width': 0.9, 'line-opacity': 0.85 },
@@ -866,7 +870,6 @@ export default function SitingPanel() {
       <aside className="siting-side">
         <div className="siting-side-head">
           <span className="siting-title">SITING.MAP</span>
-          <span className="siting-sub">14-factor composite · public data</span>
         </div>
 
         <section className="siting-block">
@@ -948,7 +951,7 @@ export default function SitingPanel() {
                           onChange={() => toggleLayer(l.key)}
                         />
                         <span className="layer-dot" style={{ background: l.color }} />
-                        <span className="layer-name">{l.name}</span>
+                        <span className="layer-name">{prettyLayerName(l)}</span>
                       </label>
                       <span className="layer-note">{note}</span>
                     </li>
@@ -1126,7 +1129,7 @@ export default function SitingPanel() {
                   ) : (
                   <div className="map-legend-row" key={l.key}>
                     <span className="map-legend-swatch" style={{ background: l.color }} />
-                    <span className="map-legend-name">{l.name}</span>
+                    <span className="map-legend-name">{prettyLayerName(l)}</span>
                   </div>
                 )
               )

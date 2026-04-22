@@ -327,10 +327,18 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
     },
     "county_subdivisions": {
         "name": "County subdivisions", "group": "Boundaries",
-        "url": f"{_HIFLD2}/County_Subdivisions_v1/FeatureServer/0",
-        "where": "1=1", "out_fields": "OBJECTID,NAME,STATE_NAME,COUNTY,GEOID",
-        "geom": "polygon", "color": "#a0a8b4", "style": "moratorium", "min_zoom": 6,
-        "source": "HIFLD", "max_records": 4000,
+        # HIFLD's County_Subdivisions_v1 service has been returning sustained
+        # 502s / SSL resets in 2026; switched primary to Census TIGERweb
+        # (layer 22 = Census 2020 County Subdivisions). HIFLD kept as a
+        # secondary mirror for future recovery.
+        "url": "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/22",
+        "source_urls": [
+            "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/22",
+            f"{_HIFLD2}/County_Subdivisions_v1/FeatureServer/0",
+        ],
+        "where": "1=1", "out_fields": "OBJECTID,BASENAME,NAME,STATE,COUNTY,GEOID,MTFCC",
+        "geom": "polygon", "color": "#a0a8b4", "min_zoom": 6,
+        "source": "US Census TIGERweb", "max_records": 2500, "page_size": 500,
     },
     # Datacenter opposition counties — rendered red. Uses our curated list
     # of counties with documented public opposition to datacenters (moved
@@ -939,6 +947,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
     seen: set[str] = set()
     source_breakdown: dict[str, int] = {}
     truncated = False
+    upstream_warning: str | None = None
     try:
         import requests as _rq
         for source_url in source_urls:
@@ -957,6 +966,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
                 try:
                     r = _resilient_get(url, timeout=30, retries=3)
                 except Exception as exc:  # noqa: BLE001
+                    upstream_warning = f"{type(exc).__name__}: {exc}"
                     if not feats:
                         # Failover to the next mirror in source_urls before 502ing
                         # the browser. Only give up once all sources exhausted.
@@ -964,6 +974,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
                     truncated = True
                     break
                 if r.status_code != 200:
+                    upstream_warning = f"HTTP {r.status_code}"
                     if not feats:
                         break  # try next source_url mirror
                     truncated = True
@@ -971,13 +982,15 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
                 try:
                     data = r.json()
                 except Exception:
+                    upstream_warning = "non-JSON response"
                     if not feats:
-                        return JSONResponse(status_code=502, content={"error": f"upstream {layer_key}: non-JSON"})
+                        break
                     truncated = True
                     break
                 if isinstance(data, dict) and "error" in data and "features" not in data:
+                    upstream_warning = f"upstream error: {data.get('error')}"
                     if not feats:
-                        return JSONResponse(status_code=502, content={"error": f"upstream: {data.get('error')}"})
+                        break
                     truncated = True
                     break
                 page = data.get("features", []) if isinstance(data, dict) else []
@@ -1008,7 +1021,19 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             if len(feats) >= target:
                 break
     except Exception as e:
-        return JSONResponse(status_code=502, content={"error": f"proxy {layer_key} failed: {e}"})
+        # Don't 502 the browser — return empty FC with a warning so the UI
+        # can flag the layer as 'gap' without spamming red errors.
+        return JSONResponse({
+            "type": "FeatureCollection",
+            "features": [],
+            "_meta": {
+                "layer": layer_key, "name": cfg["name"], "source": cfg["source"],
+                "group": cfg["group"], "geom": cfg["geom"], "color": cfg["color"],
+                "returned": 0, "limit": target, "bbox": bbox,
+                "state": state, "live": True, "truncated": True,
+                "warning": f"proxy {layer_key} failed: {e}",
+            },
+        })
 
     response = JSONResponse({
         "type": "FeatureCollection",
@@ -1021,6 +1046,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             "bbox": bbox, "bbox_used": f"{bbox_t[0]},{bbox_t[1]},{bbox_t[2]},{bbox_t[3]}",
             "state": state, "truncated": truncated, "live": True,
             "source_count": len(source_urls), "source_breakdown": source_breakdown,
+            "warning": upstream_warning,
         },
     })
     # Aggressive browser caching: identical bbox+state+layer requests are

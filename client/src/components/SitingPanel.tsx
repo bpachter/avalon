@@ -206,6 +206,7 @@ function prettyLayerName(l: LiveLayer): string {
 
 const TOP_SITE_COUNT = 20
 const CANDIDATE_SITE_COUNT = 80
+const CONUS_BBOX: [number, number, number, number] = [-125, 24, -66, 49]
 
 const FALLBACK_SAMPLE_SITES: Array<{ site_id: string; lat: number; lon: number; state: string }> = [
   { site_id: 'TX-ABL-001', lat: 32.4487, lon: -99.7331, state: 'TX' },
@@ -241,6 +242,116 @@ function topRankedResults(results: SiteResultDTO[], inputs: SiteInput[], topCoun
   return mergeCoordsIntoResults(results, inputs)
     .sort((a, b) => b.composite - a.composite)
     .slice(0, topCount)
+}
+
+function ringContainsPoint(ring: number[][], lon: number, lat: number): boolean {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0]
+    const yi = ring[i][1]
+    const xj = ring[j][0]
+    const yj = ring[j][1]
+    const intersects = ((yi > lat) !== (yj > lat))
+      && (lon < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi)
+    if (intersects) inside = !inside
+  }
+  return inside
+}
+
+function polygonContainsPoint(rings: number[][][], lon: number, lat: number): boolean {
+  if (!rings.length) return false
+  if (!ringContainsPoint(rings[0], lon, lat)) return false
+  for (let i = 1; i < rings.length; i += 1) {
+    if (ringContainsPoint(rings[i], lon, lat)) return false
+  }
+  return true
+}
+
+function boundaryContainsPoint(
+  fc: { features?: Array<{ geometry?: { type?: string; coordinates?: any } }> },
+  lon: number,
+  lat: number,
+): boolean {
+  for (const feature of fc.features ?? []) {
+    const geom = feature.geometry
+    if (!geom?.coordinates) continue
+    if (geom.type === 'Polygon' && polygonContainsPoint(geom.coordinates as number[][][], lon, lat)) {
+      return true
+    }
+    if (geom.type === 'MultiPolygon') {
+      for (const poly of geom.coordinates as number[][][][]) {
+        if (polygonContainsPoint(poly, lon, lat)) return true
+      }
+    }
+  }
+  return false
+}
+
+function boundaryBbox(
+  fc: { features?: Array<{ geometry?: { coordinates?: any } }> },
+): [number, number, number, number] | null {
+  let xmin = Infinity
+  let ymin = Infinity
+  let xmax = -Infinity
+  let ymax = -Infinity
+  const walk = (coords: any): void => {
+    if (!Array.isArray(coords) || coords.length === 0) return
+    if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+      xmin = Math.min(xmin, coords[0])
+      ymin = Math.min(ymin, coords[1])
+      xmax = Math.max(xmax, coords[0])
+      ymax = Math.max(ymax, coords[1])
+      return
+    }
+    for (const sub of coords) walk(sub)
+  }
+  for (const feature of fc.features ?? []) walk(feature.geometry?.coordinates)
+  if (!Number.isFinite(xmin) || !Number.isFinite(ymin) || !Number.isFinite(xmax) || !Number.isFinite(ymax)) {
+    return null
+  }
+  return [xmin, ymin, xmax, ymax]
+}
+
+function generateClientStateCandidates(
+  state: string,
+  boundaryFc: { features?: Array<{ geometry?: { type?: string; coordinates?: any } }> },
+  count: number,
+  bbox: [number, number, number, number],
+): SiteInput[] {
+  const [xmin, ymin, xmax, ymax] = bbox
+  const xSpan = xmax - xmin
+  const ySpan = ymax - ymin
+  if (xSpan <= 0 || ySpan <= 0) return []
+  const seed = Array.from(state).reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 7)
+  const offX = ((seed % 997) + 0.5) / 997
+  const offY = (((Math.floor(seed / 997) % 991)) + 0.5) / 991
+  const target = Math.max(count, 1)
+  const attempts = Math.max(target * 30, 600)
+  const seenCells = new Set<string>()
+  const cols = Math.max(8, Math.floor(Math.sqrt(target) * 2.5))
+  const rows = Math.max(8, Math.floor(Math.sqrt(target) * 2.5))
+  const out: SiteInput[] = []
+  for (let i = 0; i < attempts; i += 1) {
+    const fx = (offX + (i + 0.5) * 0.6180339887498949) % 1
+    const fy = (offY + (i + 0.5) * 0.7548776662466927) % 1
+    const cell = `${Math.floor(fx * cols)}:${Math.floor(fy * rows)}`
+    if (seenCells.has(cell)) continue
+    const lon = xmin + fx * xSpan
+    const lat = ymin + fy * ySpan
+    if (!boundaryContainsPoint(boundaryFc, lon, lat)) continue
+    seenCells.add(cell)
+    const idx = out.length + 1
+    out.push({
+      site_id: `${state}-CAND-${String(idx).padStart(3, '0')}`,
+      lat: Number(lat.toFixed(6)),
+      lon: Number(lon.toFixed(6)),
+      state,
+      generated: true,
+      source: 'client_state_boundary',
+    })
+    if (out.length >= target) break
+  }
+  return out
 }
 
 export default function SitingPanel() {
@@ -340,9 +451,31 @@ export default function SitingPanel() {
     try {
       const r = await fetchSitingSample(state, CANDIDATE_SITE_COUNT)
       const fallback = FALLBACK_SAMPLE_SITES.filter((s) => s.state === state)
-      const candidates = Array.isArray(r.sites) && r.sites.length > 0
-        ? r.sites
-        : (fallback.length > 0 ? fallback : FALLBACK_SAMPLE_SITES)
+      const requestedState = state.toUpperCase()
+      const serverSites = Array.isArray(r.sites)
+        ? (r.sites as SiteInput[])
+        : []
+      const serverLooksValid = serverSites.length >= TOP_SITE_COUNT
+        && serverSites.every((s) => ((s.state as string | undefined) ?? requestedState).toUpperCase() === requestedState)
+
+      let candidates: SiteInput[] = serverLooksValid ? serverSites : []
+      if (!serverLooksValid) {
+        const boundary = await fetchSitingProxyGeoJSON('state_boundary', CONUS_BBOX, 1, requestedState)
+        if (!('error' in boundary)) {
+          const boundaryBox = boundaryBbox(
+            boundary as { features?: Array<{ geometry?: { coordinates?: any } }> },
+          )
+          candidates = generateClientStateCandidates(
+            requestedState,
+            boundary as { features?: Array<{ geometry?: { type?: string; coordinates?: any } }> },
+            CANDIDATE_SITE_COUNT,
+            boundaryBox ?? CONUS_BBOX,
+          )
+        }
+      }
+      if (candidates.length === 0) {
+        candidates = fallback.length > 0 ? fallback : FALLBACK_SAMPLE_SITES
+      }
       setSiteInputs(candidates)
       const scored = await scoreSites({
         sites: candidates,

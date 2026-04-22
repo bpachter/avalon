@@ -441,6 +441,16 @@ export default function SitingPanel() {
     setCoverageLoading(false)
   }, [])
 
+  const sanitizeOverrides = useCallback((overrides?: Record<string, number>) => {
+    if (!overrides || Object.keys(overrides).length === 0) return undefined
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(overrides)) {
+      if ((stubCoverage[k] ?? 0) >= 1) continue
+      out[k] = v
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }, [stubCoverage])
+
   const loadStateCandidates = useCallback(async (
     state: string,
     kind: Archetype,
@@ -480,7 +490,7 @@ export default function SitingPanel() {
       const scored = await scoreSites({
         sites: candidates,
         archetype: kind,
-        weight_overrides: overrides && Object.keys(overrides).length ? overrides : undefined,
+        weight_overrides: sanitizeOverrides(overrides),
       })
       if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
       const top = topRankedResults(scored.results, candidates)
@@ -491,7 +501,7 @@ export default function SitingPanel() {
     } finally {
       setScoring(false)
     }
-  }, [])
+  }, [sanitizeOverrides])
 
   useEffect(() => {
     if (!mapReady) return
@@ -960,14 +970,17 @@ export default function SitingPanel() {
 
   // ── re-score on archetype / weight changes ────────────────────────────
   async function rescoreAll() {
-    if (siteInputs.length === 0) return
+    if (siteInputs.length === 0) {
+      await loadStateCandidates(activeState, archetype, weightOverrides)
+      return
+    }
     setScoring(true)
     setError(null)
     try {
       const r = await scoreSites({
         sites: siteInputs,
         archetype,
-        weight_overrides: Object.keys(weightOverrides).length ? weightOverrides : undefined,
+        weight_overrides: sanitizeOverrides(weightOverrides),
       })
       const top = topRankedResults(r.results, siteInputs)
       setSites(top)
@@ -1006,6 +1019,30 @@ export default function SitingPanel() {
 
   const factorList = factorsCatalog?.factors ?? []
   const baseWeights = factorsCatalog?.weights[archetype] ?? {}
+
+  const stubbedFactors = useMemo(() => {
+    const out = new Set<string>()
+    for (const f of factorList) {
+      if ((stubCoverage[f] ?? 1) >= 1) out.add(f)
+    }
+    return out
+  }, [factorList, stubCoverage])
+
+  const effectiveWeightPct = useMemo(() => {
+    const raw: Record<string, number> = {}
+    let total = 0
+    for (const f of factorList) {
+      const base = weightOverrides[f] ?? baseWeights[f] ?? 0
+      const val = stubbedFactors.has(f) ? 0 : base
+      raw[f] = val
+      total += val
+    }
+    const out: Record<string, number> = {}
+    for (const f of factorList) {
+      out[f] = total > 0 ? (raw[f] / total) * 100 : 0
+    }
+    return out
+  }, [factorList, baseWeights, weightOverrides, stubbedFactors])
 
   const visibleLayers = useMemo(
     () => layers.filter((l) => l.key !== 'transmission_duke'),
@@ -1129,7 +1166,7 @@ export default function SitingPanel() {
           </div>
         </section>
 
-        <section className="siting-block">
+        <section className="siting-block dq-block">
           <div className="siting-block-head">
             <span>DATA QUALITY · {activeState}</span>
             <button
@@ -1195,7 +1232,7 @@ export default function SitingPanel() {
           )}
         </section>
 
-        <section className="siting-block">
+        <section className="siting-block weights-block">
           <div className="siting-block-head">
             <span>WEIGHTS · {archetype}</span>
             <button className="link-btn" onClick={resetWeights}>reset</button>
@@ -1215,6 +1252,7 @@ export default function SitingPanel() {
               const cur = weightOverrides[f] ?? base
               const cov = stubCoverage[f]
               const stubbed = cov != null && cov >= 1
+              const eff = effectiveWeightPct[f] ?? 0
               return (
                 <div key={f} className="weight-row">
                   <div className="weight-row-head">
@@ -1222,11 +1260,14 @@ export default function SitingPanel() {
                       {f}
                       {stubbed && <span className="factor-tag" title="imputed from cohort median (no real data yet)"> · STUB</span>}
                     </span>
-                    <span className="factor-val">{(cur * 100).toFixed(0)}</span>
+                    <span className="factor-val" title="effective normalized weight across live factors">
+                      {(cur * 100).toFixed(0)} · eff {eff.toFixed(0)}
+                    </span>
                   </div>
                   <input
                     type="range" min={0} max={0.30} step={0.01}
                     value={cur}
+                    disabled={stubbed}
                     onChange={(e) => setWeight(f, parseFloat(e.target.value))}
                   />
                 </div>

@@ -45,6 +45,8 @@
   padding: 12px 16px 16px;
   border-bottom: 1px solid var(--border);
 }
+.weights-block { order: 20; }
+.dq-block { order: 21; }
 .siting-block-head {
   display: flex;
   justify-content: space-between;

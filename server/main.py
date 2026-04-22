@@ -972,9 +972,17 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     merged: list[dict] = list(primary_feats)
     merged_seen: set[str] = set(primary_seen)
 
+    # For very small bboxes (zoomed in), skip expensive state discovery and
+    # proceed directly to Overpass fallback. Bboxes < 0.1 deg in either dimension
+    # are city-scale or smaller; state discovery wastes 10-20 seconds on ArcGIS
+    # count checks when Overpass will provide results in 2-3 seconds.
+    bbox_width = xmax - xmin
+    bbox_height = ymax - ymin
+    is_zoomed_in = bbox_width < 0.1 or bbox_height < 0.1
+
     # Auto-discover state-level ArcGIS fiber services to improve coverage
     # beyond the global feed, then merge unique features.
-    if state and len(merged) < sparse_threshold:
+    if state and len(merged) < sparse_threshold and not is_zoomed_in:
         for src in _state_fiber_sources(state, (xmin, ymin, xmax, ymax), max_sources=3):
             if len(merged) >= limit:
                 break
@@ -1018,8 +1026,11 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     # `communication=line` tag returns most NC long-haul routes; the others
     # catch regional variations and underground/aerial cables. Keep
     # underwater submarine cables out (location!='underwater').
+    # Timeout reduced to 10s based on observed lz4.overpass-api.de response
+    # times of 1.7-7s. This prevents extended waits when primary source is
+    # unavailable; Overpass is best-effort anyway.
     ql = (
-        f"[out:json][timeout:25];"
+        f"[out:json][timeout:10];"
         f"("
         f"  way['telecom'='line']({ymin},{xmin},{ymax},{xmax});"
         f"  way['communication'='line']({ymin},{xmin},{ymax},{xmax});"

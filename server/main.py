@@ -1026,11 +1026,11 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     # `communication=line` tag returns most NC long-haul routes; the others
     # catch regional variations and underground/aerial cables. Keep
     # underwater submarine cables out (location!='underwater').
-    # Timeout reduced to 10s based on observed lz4.overpass-api.de response
-    # times of 1.7-7s. This prevents extended waits when primary source is
-    # unavailable; Overpass is best-effort anyway.
+    # Timeout set to 20s to match HTTP timeout below. Overpass returns best-effort
+    # results if it hits the limit, so this prevents long hangs while still allowing
+    # complex multi-tag queries to complete.
     ql = (
-        f"[out:json][timeout:10];"
+        f"[out:json][timeout:20];"
         f"("
         f"  way['telecom'='line']({ymin},{xmin},{ymax},{xmax});"
         f"  way['communication'='line']({ymin},{xmin},{ymax},{xmax});"

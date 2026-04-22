@@ -117,6 +117,29 @@ def score_sites(
         finite = vals[np.isfinite(vals)]
         medians[fname] = float(np.median(finite)) if len(finite) else 0.5
 
+    # Reweight onto factors that actually differentiate this cohort.
+    # Factors that are fully stubbed, fully missing, or effectively constant
+    # add the same offset to every site and collapse the score range.
+    active_factors: set[str] = set()
+    for fname, results in per_factor.items():
+        vals = np.array([r.sub_score for r in results], dtype=float)
+        finite = vals[np.isfinite(vals)]
+        if len(finite) == 0:
+            continue
+        spread = float(np.max(finite) - np.min(finite))
+        all_stubbed = all(bool((r.provenance or {}).get("stub", False)) for r in results)
+        if not all_stubbed and spread > 1e-6:
+            active_factors.add(fname)
+
+    weights_effective = dict(weights)
+    if active_factors:
+        active_total = sum(weights[f] for f in active_factors)
+        if active_total > 0:
+            weights_effective = {
+                f: (weights[f] / active_total if f in active_factors else 0.0)
+                for f in config.FACTOR_NAMES
+            }
+
     # Pass 3: assemble per-site composite
     out: list[SiteScore] = []
     for i, site in enumerate(sites):
@@ -137,7 +160,7 @@ def score_sites(
             imputed_dict[fname] = float(value)
             kills[fname] = bool(res.kill)
             prov[fname] = res.provenance
-            weighted += weights[fname] * value
+            weighted += weights_effective[fname] * value
         composite = 10.0 * weighted
         if any(kills.values()):
             composite = 0.0
@@ -152,7 +175,7 @@ def score_sites(
                 raw_sub_scores=raw,
                 kill_flags=kills,
                 provenance=prov,
-                weights_used=weights,
+                weights_used=weights_effective,
                 imputed=imputed_list,
                 extras=dict(site.extras),
             )

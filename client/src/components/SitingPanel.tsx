@@ -204,6 +204,9 @@ function prettyLayerName(l: LiveLayer): string {
   return l.name
 }
 
+const TOP_SITE_COUNT = 20
+const CANDIDATE_SITE_COUNT = 80
+
 const FALLBACK_SAMPLE_SITES: Array<{ site_id: string; lat: number; lon: number; state: string }> = [
   { site_id: 'TX-ABL-001', lat: 32.4487, lon: -99.7331, state: 'TX' },
   { site_id: 'VA-LDN-001', lat: 39.0840, lon: -77.6555, state: 'VA' },
@@ -219,23 +222,8 @@ const FALLBACK_SAMPLE_SITES: Array<{ site_id: string; lat: number; lon: number; 
 
 type SiteInput = { site_id: string; lat: number; lon: number; [k: string]: unknown }
 
-const FALLBACK_BY_ID: Record<string, SiteInput> = Object.fromEntries(
-  FALLBACK_SAMPLE_SITES.map((s) => [s.site_id, s]),
-)
-
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v)
-}
-
-function toSiteInputsFromResults(results: SiteResultDTO[]): SiteInput[] {
-  const out: SiteInput[] = []
-  for (const r of results as Array<SiteResultDTO & { extras?: Record<string, unknown> }>) {
-    const lat = isFiniteNumber(r.lat) ? r.lat : FALLBACK_BY_ID[r.site_id]?.lat
-    const lon = isFiniteNumber(r.lon) ? r.lon : FALLBACK_BY_ID[r.site_id]?.lon
-    if (!isFiniteNumber(lat) || !isFiniteNumber(lon)) continue
-    out.push({ site_id: r.site_id, lat, lon, ...(r.extras ?? {}) })
-  }
-  return out
 }
 
 function mergeCoordsIntoResults(results: SiteResultDTO[], inputs: SiteInput[]): SiteResultDTO[] {
@@ -247,6 +235,12 @@ function mergeCoordsIntoResults(results: SiteResultDTO[], inputs: SiteInput[]): 
       return { ...r, lat: src.lat, lon: src.lon, extras: { ...(r.extras ?? {}), ...src } }
     })
     .filter((r) => isFiniteNumber(r.lat) && isFiniteNumber(r.lon))
+}
+
+function topRankedResults(results: SiteResultDTO[], inputs: SiteInput[], topCount = TOP_SITE_COUNT): SiteResultDTO[] {
+  return mergeCoordsIntoResults(results, inputs)
+    .sort((a, b) => b.composite - a.composite)
+    .slice(0, topCount)
 }
 
 export default function SitingPanel() {
@@ -336,6 +330,36 @@ export default function SitingPanel() {
     setCoverageLoading(false)
   }, [])
 
+  const loadStateCandidates = useCallback(async (
+    state: string,
+    kind: Archetype,
+    overrides?: Record<string, number>,
+  ) => {
+    setScoring(true)
+    setError(null)
+    try {
+      const r = await fetchSitingSample(state, CANDIDATE_SITE_COUNT)
+      const fallback = FALLBACK_SAMPLE_SITES.filter((s) => s.state === state)
+      const candidates = Array.isArray(r.sites) && r.sites.length > 0
+        ? r.sites
+        : (fallback.length > 0 ? fallback : FALLBACK_SAMPLE_SITES)
+      setSiteInputs(candidates)
+      const scored = await scoreSites({
+        sites: candidates,
+        archetype: kind,
+        weight_overrides: overrides && Object.keys(overrides).length ? overrides : undefined,
+      })
+      if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
+      const top = topRankedResults(scored.results, candidates)
+      setSites(top)
+      setSelectedId(prev => (prev && top.some((s) => s.site_id === prev)) ? prev : (top[0]?.site_id ?? null))
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setScoring(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!mapReady) return
     refreshCoverage(activeState)
@@ -368,43 +392,11 @@ export default function SitingPanel() {
 
   useEffect(() => {
     loadCatalog()
-    fetchSitingSample()
-      .then(async (r) => {
-        if (r.stub_coverage) setStubCoverage(r.stub_coverage)
-        if (Array.isArray(r.results)) {
-          const inputs = toSiteInputsFromResults(r.results)
-          if (inputs.length > 0) {
-            setSiteInputs(inputs)
-            setSites(mergeCoordsIntoResults(r.results, inputs))
-            return
-          }
-          const scored = await scoreSites({ sites: FALLBACK_SAMPLE_SITES, archetype })
-          if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
-          setSiteInputs(FALLBACK_SAMPLE_SITES)
-          setSites(mergeCoordsIntoResults(scored.results, FALLBACK_SAMPLE_SITES))
-          return
-        }
-        if (Array.isArray(r.sites) && r.sites.length > 0) {
-          const scored = await scoreSites({ sites: r.sites, archetype })
-          if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
-          setSiteInputs(r.sites)
-          setSites(mergeCoordsIntoResults(scored.results, r.sites))
-        }
-      })
-      .catch(async () => {
-        try {
-          const scored = await scoreSites({
-            sites: FALLBACK_SAMPLE_SITES,
-            archetype,
-          })
-          if (scored.stub_coverage) setStubCoverage(scored.stub_coverage)
-          setSiteInputs(FALLBACK_SAMPLE_SITES)
-          setSites(mergeCoordsIntoResults(scored.results, FALLBACK_SAMPLE_SITES))
-        } catch (e) {
-          setError(String(e))
-        }
-      })
-  }, [])
+  }, [loadCatalog])
+
+  useEffect(() => {
+    loadStateCandidates(activeState, archetype, weightOverrides)
+  }, [activeState, loadStateCandidates])
 
   // ── init MapLibre ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -844,7 +836,9 @@ export default function SitingPanel() {
         archetype,
         weight_overrides: Object.keys(weightOverrides).length ? weightOverrides : undefined,
       })
-      setSites(mergeCoordsIntoResults(r.results, siteInputs))
+      const top = topRankedResults(r.results, siteInputs)
+      setSites(top)
+      setSelectedId(prev => (prev && top.some((s) => s.site_id === prev)) ? prev : (top[0]?.site_id ?? null))
       if (r.stub_coverage) setStubCoverage(r.stub_coverage)
     } catch (e) {
       setError(String(e))
@@ -1327,7 +1321,7 @@ export default function SitingPanel() {
       {/* ── Right rail: ranked list ── */}
       <aside className="siting-rank">
         <div className="siting-side-head">
-          <span className="siting-title">RANKED · {ranked.length}</span>
+          <span className="siting-title">TOP 20 · {activeState}</span>
           <span className="siting-sub">{archetype}</span>
         </div>
         <ol className="rank-list">

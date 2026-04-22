@@ -145,12 +145,16 @@ export async function fetchSitingFactors(): Promise<SitingFactorsResponse> {
   return fetchJson(`${BASE}/api/siting/factors`, 'siting/factors')
 }
 
-export async function fetchSitingSample(): Promise<{
+export async function fetchSitingSample(state?: string, count = 80): Promise<{
   results?: SiteResultDTO[]
   sites?: Array<{ site_id: string; lat: number; lon: number; [k: string]: unknown }>
   stub_coverage?: Record<string, number>
+  state?: string
+  count?: number
 }> {
-  return fetchJson(`${BASE}/api/siting/sample`, 'siting/sample')
+  const params = new URLSearchParams({ count: String(count) })
+  if (state) params.set('state', state)
+  return fetchJson(`${BASE}/api/siting/sample?${params}`, 'siting/sample')
 }
 
 export async function scoreSites(payload: {

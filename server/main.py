@@ -161,31 +161,108 @@ def siting_score(req: SitingRequest):
 
 
 @app.get("/api/siting/sample")
-def siting_sample():
-    score_mod, _ = _import_dcsite()
-    if score_mod is None:
-        return JSONResponse(status_code=503, content={"error": "scoring engine unavailable"})
+def _fallback_sample_sites_for_state(state: str, count: int) -> list[dict]:
     import csv as _csv
     scoring_root = _resolve_scoring_root()
     if scoring_root is None:
-        return JSONResponse(status_code=503, content={"error": "scoring engine unavailable"})
+        return []
     sample_csv = scoring_root / "config" / "sample_sites.csv"
     if not sample_csv.exists():
-        return JSONResponse(status_code=404, content={"error": "sample_sites.csv missing"})
+        return []
+    st = state.upper().strip()
+    matches: list[dict] = []
+    any_sites: list[dict] = []
+    with sample_csv.open(newline="", encoding="utf-8") as f:
+        for row in _csv.DictReader(f):
+            site = {
+                "site_id": row["site_id"],
+                "lat": float(row["lat"]),
+                "lon": float(row["lon"]),
+                **{k: v for k, v in row.items() if k not in {"site_id", "lat", "lon"}},
+            }
+            any_sites.append(site)
+            if str(row.get("state") or "").upper().strip() == st:
+                matches.append(site)
+    out = matches[:count]
+    if out:
+        return out
+    return any_sites[:count]
+
+
+def _generate_state_candidate_sites(state: str, count: int) -> list[dict]:
+    st = state.upper().strip()
+    region = _state_only_bbox(st)
+    if region is None:
+        return []
+    xmin, ymin, xmax, ymax = region
     try:
-        sites = []
-        with sample_csv.open(newline="", encoding="utf-8") as f:
-            for row in _csv.DictReader(f):
-                sites.append(score_mod.Site(
-                    site_id=row["site_id"],
-                    lat=float(row["lat"]),
-                    lon=float(row["lon"]),
-                    extras={k: v for k, v in row.items() if k not in {"site_id", "lat", "lon"}},
-                ))
-        results = score_mod.score_sites(sites, archetype="training")
+        from shapely.geometry import Point as _Point
+        from shapely.prepared import prep as _prep
+    except Exception:
+        return _fallback_sample_sites_for_state(st, count)
+
+    poly = _state_polygon_geom(st)
+    if poly is None:
+        return _fallback_sample_sites_for_state(st, count)
+    prepared = _prep(poly)
+
+    # Deterministic low-discrepancy sequence inside the state polygon.
+    # Oversample the candidate pool so the scorer can meaningfully rank a top-20.
+    target = max(int(count), 1)
+    attempts = max(target * 30, 600)
+    sites: list[dict] = []
+    seen_cells: set[tuple[int, int]] = set()
+    x_span = xmax - xmin
+    y_span = ymax - ymin
+    if x_span <= 0 or y_span <= 0:
+        return []
+    cell_cols = max(8, int(target ** 0.5 * 2.5))
+    cell_rows = max(8, int(target ** 0.5 * 2.5))
+    # State-specific offset keeps sequences stable but different per state.
+    seed = int(hashlib.sha1(st.encode("utf-8")).hexdigest()[:8], 16)
+    off_x = ((seed % 997) / 997.0)
+    off_y = (((seed // 997) % 991) / 991.0)
+    for i in range(attempts):
+        fx = (off_x + (i + 0.5) * 0.6180339887498949) % 1.0
+        fy = (off_y + (i + 0.5) * 0.7548776662466927) % 1.0
+        lon = xmin + fx * x_span
+        lat = ymin + fy * y_span
+        cell = (int(fx * cell_cols), int(fy * cell_rows))
+        if cell in seen_cells:
+            continue
+        pt = _Point(lon, lat)
+        if not prepared.covers(pt):
+            continue
+        seen_cells.add(cell)
+        idx = len(sites) + 1
+        sites.append({
+            "site_id": f"{st}-CAND-{idx:03d}",
+            "lat": round(lat, 6),
+            "lon": round(lon, 6),
+            "state": st,
+            "generated": True,
+        })
+        if len(sites) >= target:
+            break
+    if sites:
+        return sites
+    return _fallback_sample_sites_for_state(st, count)
+
+
+@app.get("/api/siting/sample")
+def siting_sample(state: str = "NC", count: int = 80):
+    score_mod, _ = _import_dcsite()
+    if score_mod is None:
+        return JSONResponse(status_code=503, content={"error": "scoring engine unavailable"})
+    try:
+        st = state.upper().strip()
+        sites = _generate_state_candidate_sites(st, max(20, min(int(count), 200)))
+        if not sites:
+            return JSONResponse(status_code=404, content={"error": f"no sample sites available for {st}"})
         return {
-            "results": [r.to_dict() for r in results],
-            "stub_coverage": score_mod.stub_coverage(results),
+            "state": st,
+            "count": len(sites),
+            "sites": sites,
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

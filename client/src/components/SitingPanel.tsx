@@ -562,11 +562,14 @@ export default function SitingPanel() {
     // Bump generation; if it changes before we land, discard the response.
     const myGen = (overlayGenRef.current.get(key) ?? 0) + 1
     overlayGenRef.current.set(key, myGen)
-    // No artificial cap on visible features — backend max_records bounds the
-    // payload. We rely on state-region clipping in the proxy to keep payloads
-    // sane while still rendering everything in the visible viewport.
+    // Keep parcel payloads small at lower zooms; ramp detail as user zooms in.
+    // This makes parcel outlines usable at z13 without stalling the map.
+    const parcelLimit =
+      zoom < 13.5 ? 350 :
+      zoom < 14.5 ? 700 :
+      1200
     const limit =
-      lyr.key.endsWith('_parcels') ? 1500 :
+      lyr.key.endsWith('_parcels') ? parcelLimit :
       lyr.key === 'county_subdivisions' ? 2500 :
       50000
     let data: any

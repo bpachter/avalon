@@ -385,8 +385,9 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "name": "Parcel outlines (NC)", "group": "Boundaries",
         "url": f"{_NCONEMAP}/NC1Map_Parcels/FeatureServer/1",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "NC OneMap", "max_records": 2000, "page_size": 1000,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
+        "source": "NC OneMap", "max_records": 2000, "page_size": 500,
+        "simplify_min_offset": 0.00008, "geometry_precision": 6,
         "state": "NC",
     },
     "sc_parcels": {
@@ -395,32 +396,36 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # we could reach without a token. Future: add additional county feeds.
         "url": "https://services1.arcgis.com/2AGLxyiJoNiVHKwq/arcgis/rest/services/Parcels/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "York County SC GIS", "max_records": 2000, "page_size": 1000,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
+        "source": "York County SC GIS", "max_records": 2000, "page_size": 500,
+        "simplify_min_offset": 0.00008, "geometry_precision": 6,
         "state": "SC",
     },
     "fl_parcels": {
         "name": "Parcel outlines (FL)", "group": "Boundaries",
         "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
         "source": "FDOR Cadastral (FL DOR)", "max_records": 1500, "page_size": 500,
+        "simplify_min_offset": 0.00008, "geometry_precision": 6,
         "state": "FL",
     },
     "in_parcels": {
         "name": "Parcel outlines (IN)", "group": "Boundaries",
         "url": "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "IndianaMap (IGIO)", "max_records": 2000, "page_size": 1000,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
+        "source": "IndianaMap (IGIO)", "max_records": 2000, "page_size": 500,
+        "simplify_min_offset": 0.00008, "geometry_precision": 6,
         "state": "IN",
     },
     "oh_parcels": {
         "name": "Parcel outlines (OH)", "group": "Boundaries",
         "url": "https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "OGRIP Ohio Statewide Parcels", "max_records": 2000, "page_size": 1000,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
+        "source": "OGRIP Ohio Statewide Parcels", "max_records": 2000, "page_size": 500,
+        "simplify_min_offset": 0.00008, "geometry_precision": 6,
         "state": "OH",
     },
     "ky_parcels": {
@@ -429,8 +434,9 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # style parcel feed we could reach without a token. Future: add more.
         "url": "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/New_AllParcels/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 14,
-        "source": "Jefferson County KY PVA", "max_records": 2000, "page_size": 1000,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
+        "source": "Jefferson County KY PVA", "max_records": 2000, "page_size": 500,
+        "simplify_min_offset": 0.00008, "geometry_precision": 6,
         "state": "KY",
     },
 }
@@ -542,7 +548,13 @@ def _arcgis_query_url(cfg: dict, bbox: tuple, *, page_size: int, offset: int, ex
     bbox_deg = max(xmax - xmin, ymax - ymin)
     if bbox_deg > 0:
         # ~1px at the viewport's pixel density (assume ~800px wide).
-        params["maxAllowableOffset"] = round(bbox_deg / 800.0, 6)
+        simp = bbox_deg / 800.0
+        min_simp = float(cfg.get("simplify_min_offset", 0) or 0)
+        if min_simp > 0:
+            simp = max(simp, min_simp)
+        params["maxAllowableOffset"] = round(simp, 6)
+    if cfg.get("geometry_precision") is not None:
+        params["geometryPrecision"] = int(cfg["geometry_precision"])
     return cfg["url"] + "/query?" + urlencode(params)
 
 
@@ -569,7 +581,13 @@ def _arcgis_query_url_for_source(
     }
     bbox_deg = max(xmax - xmin, ymax - ymin)
     if bbox_deg > 0:
-        params["maxAllowableOffset"] = round(bbox_deg / 800.0, 6)
+        simp = bbox_deg / 800.0
+        min_simp = float(cfg.get("simplify_min_offset", 0) or 0)
+        if min_simp > 0:
+            simp = max(simp, min_simp)
+        params["maxAllowableOffset"] = round(simp, 6)
+    if cfg.get("geometry_precision") is not None:
+        params["geometryPrecision"] = int(cfg["geometry_precision"])
     return source_url + "/query?" + urlencode(params)
 
 
@@ -1121,17 +1139,26 @@ def siting_live_layers():
 
 
 @app.get("/api/siting/proxy/{layer_key}")
-def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, state: str | None = None):
+def siting_proxy(
+    layer_key: str,
+    bbox: str | None = None,
+    limit: int = 8000,
+    state: str | None = None,
+    as_dict: bool = False,
+):
     cfg = LIVE_LAYER_REGISTRY.get(layer_key)
     if not cfg:
-        return JSONResponse(status_code=404, content={"error": f"unknown layer {layer_key!r}"})
+        payload = {"error": f"unknown layer {layer_key!r}"}
+        return payload if as_dict else JSONResponse(status_code=404, content=payload)
     if not bbox:
-        return JSONResponse(status_code=400, content={"error": "bbox required"})
+        payload = {"error": "bbox required"}
+        return payload if as_dict else JSONResponse(status_code=400, content=payload)
     try:
         parts = [float(x) for x in bbox.split(",")]
         bbox_t = (parts[0], parts[1], parts[2], parts[3])
     except Exception as e:
-        return JSONResponse(status_code=400, content={"error": f"bad bbox: {e}"})
+        payload = {"error": f"bad bbox: {e}"}
+        return payload if as_dict else JSONResponse(status_code=400, content=payload)
 
     # Internal layers — fiber + opposition — are served by in-process
     # handlers instead of an ArcGIS upstream.
@@ -1267,7 +1294,7 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
     except Exception as e:
         # Don't 502 the browser — return empty FC with a warning so the UI
         # can flag the layer as 'gap' without spamming red errors.
-        return JSONResponse({
+        payload = {
             "type": "FeatureCollection",
             "features": [],
             "_meta": {
@@ -1277,13 +1304,14 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
                 "state": state, "live": True, "truncated": True,
                 "warning": f"proxy {layer_key} failed: {e}",
             },
-        })
+        }
+        return payload if as_dict else JSONResponse(payload)
 
     state_polygon_clipped = False
     if state and layer_key in {"transmission", "transmission_duke", "natgas_pipelines"}:
         feats, state_polygon_clipped = _clip_features_to_state_polygon(feats, state)
 
-    response = JSONResponse({
+    payload = {
         "type": "FeatureCollection",
         "features": feats[:target],
         "_meta": {
@@ -1297,7 +1325,10 @@ def siting_proxy(layer_key: str, bbox: str | None = None, limit: int = 8000, sta
             "source_count": len(source_urls), "source_breakdown": source_breakdown,
             "warning": upstream_warning,
         },
-    })
+    }
+    if as_dict:
+        return payload
+    response = JSONResponse(payload)
     # Aggressive browser caching: identical bbox+state+layer requests are
     # served instantly from the browser/Railway edge instead of re-querying
     # the upstream. 5-minute private TTL is short enough that infrastructure
@@ -1373,7 +1404,7 @@ def siting_qa_queue_freshness(state: str = "NC"):
 
 
 @app.get("/api/siting/qa/coverage")
-def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int = 1500):
+def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int = 600):
     """Cross-layer data-quality snapshot for a state region.
 
     Returns per-layer feature counts, source breakdown, fetch latency, and
@@ -1396,20 +1427,20 @@ def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int 
     else:
         keys = [k for k in default_keys if k in LIVE_LAYER_REGISTRY]
 
-    report: list[dict] = []
-    for key in keys:
+    from concurrent.futures import ThreadPoolExecutor, wait as _wait
+
+    def _probe_layer(key: str) -> dict:
         cfg = LIVE_LAYER_REGISTRY[key]
         t0 = _time.perf_counter()
-        out = siting_proxy(key, bbox=bbox, limit=limit, state=st)
+        out = siting_proxy(key, bbox=bbox, limit=limit, state=st, as_dict=True)
         elapsed_ms = int((_time.perf_counter() - t0) * 1000)
-        if isinstance(out, JSONResponse):
-            report.append({
+        if isinstance(out, dict) and out.get("error"):
+            return {
                 "key": key, "name": cfg["name"], "group": cfg["group"],
                 "source": cfg["source"], "ok": False,
-                "error": f"HTTP {out.status_code}",
+                "error": str(out.get("error")),
                 "elapsed_ms": elapsed_ms,
-            })
-            continue
+            }
         meta = out.get("_meta") or {}
         returned = len(out.get("features", []))
         cap = int(cfg.get("max_records", 4000))
@@ -1422,7 +1453,7 @@ def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int 
             confidence = "multi-source"
         else:
             confidence = "ok"
-        report.append({
+        return {
             "key": key,
             "name": cfg["name"],
             "group": cfg["group"],
@@ -1435,7 +1466,45 @@ def siting_qa_coverage(state: str = "NC", layers: str | None = None, limit: int 
             "source_breakdown": meta.get("source_breakdown") or {},
             "elapsed_ms": elapsed_ms,
             "confidence": confidence,
-        })
+        }
+
+    report_by_key: dict[str, dict] = {}
+    timeout_s = 12
+    ex = ThreadPoolExecutor(max_workers=min(6, max(1, len(keys))))
+    futs = {k: ex.submit(_probe_layer, k) for k in keys}
+    done, not_done = _wait(set(futs.values()), timeout=timeout_s)
+    fut_to_key = {v: k for k, v in futs.items()}
+    for f in done:
+        k = fut_to_key[f]
+        cfg = LIVE_LAYER_REGISTRY[k]
+        try:
+            report_by_key[k] = f.result()
+        except Exception as e:  # noqa: BLE001
+            report_by_key[k] = {
+                "key": k,
+                "name": cfg["name"],
+                "group": cfg["group"],
+                "source": cfg["source"],
+                "ok": False,
+                "error": str(e),
+                "elapsed_ms": 0,
+            }
+    for f in not_done:
+        k = fut_to_key[f]
+        cfg = LIVE_LAYER_REGISTRY[k]
+        report_by_key[k] = {
+            "key": k,
+            "name": cfg["name"],
+            "group": cfg["group"],
+            "source": cfg["source"],
+            "ok": False,
+            "error": f"timeout after {timeout_s}s",
+            "elapsed_ms": timeout_s * 1000,
+        }
+        f.cancel()
+    ex.shutdown(wait=False, cancel_futures=True)
+
+    report = [report_by_key[k] for k in keys]
 
     live_count = sum(1 for r in report if r.get("ok") and (r.get("returned") or 0) > 0)
     return {

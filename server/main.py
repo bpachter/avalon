@@ -855,7 +855,10 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     except Exception as exc:  # noqa: BLE001
         primary_warning = f"Primary fiber source unavailable ({type(exc).__name__}: {exc})"
 
-    if primary_feats:
+    # If primary returns only a tiny amount of geometry, supplement it with
+    # OSM long-haul tags so statewide coverage is still useful.
+    sparse_threshold = min(limit, 80)
+    if primary_feats and len(primary_feats) >= sparse_threshold:
         return {
             "type": "FeatureCollection",
             "features": primary_feats,
@@ -925,6 +928,9 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
         }
 
     feats: list[dict] = []
+    seen = set(primary_seen)
+    if primary_feats:
+        feats.extend(primary_feats)
     for el in data.get("elements", []):
         if el.get("type") != "way":
             continue
@@ -936,7 +942,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
         if len(coords) < 2:
             continue
         tags = el.get("tags") or {}
-        feats.append({
+        feat = {
             "type": "Feature",
             "geometry": {"type": "LineString", "coordinates": coords},
             "properties": {
@@ -950,21 +956,33 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
                 "cable": tags.get("cable"),
                 "source_osm_tags": tags,
             },
-        })
+        }
+        sig = _feature_sig(feat)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        feats.append(feat)
         if len(feats) >= limit:
             break
+
+    source_label = (
+        "Global Optical Fiber Network (ArcGIS) + OpenStreetMap (Overpass API)"
+        if primary_feats else
+        "OpenStreetMap (Overpass API)"
+    )
+    fallback_used = not bool(primary_feats)
 
     return {
         "type": "FeatureCollection",
         "features": feats,
         "_meta": {
             "layer": "fiber_lines", "name": "Fiber optic cables",
-            "source": "OpenStreetMap (Overpass API)", "group": "Connectivity",
+            "source": source_label, "group": "Connectivity",
             "geom": "line", "color": "#ffa726", "min_zoom": 6,
             "returned": len(feats), "limit": limit,
             "bbox": f"{xmin},{ymin},{xmax},{ymax}",
             "state": state, "live": True,
-            "fallback_used": True,
+            "fallback_used": fallback_used,
             "warning": primary_warning,
         },
     }

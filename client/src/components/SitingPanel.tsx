@@ -750,12 +750,17 @@ export default function SitingPanel() {
       const beforeId = map.getLayer('sites-halo') ? 'sites-halo' : undefined
       if (lyr.geom === 'line') {
         const isVoltage = lyr.style === 'voltage' || key === 'transmission'
+        const isFiber = key === 'fiber_lines'
         map.addLayer({
           id: LYR, type: 'line', source: SRC,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
           paint: {
             'line-color': isVoltage ? VOLTAGE_COLOR_EXPR : lyr.color,
-            'line-width': isVoltage ? VOLTAGE_WIDTH_EXPR : 1.2,
+            'line-width': isVoltage
+              ? VOLTAGE_WIDTH_EXPR
+              : isFiber
+                ? ['interpolate', ['linear'], ['zoom'], 4, 1.4, 7, 2.2, 10, 3.0]
+                : 1.2,
             'line-opacity': 0.92,
           },
         }, beforeId)

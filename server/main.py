@@ -1865,6 +1865,13 @@ def siting_proxy(
             # Current HIFLD transmission feed used by the map has no STATE fields.
             # Keep transmission constrained by bbox only to avoid upstream SQL errors.
             extra_where = None
+        elif layer_key in {"fema_flood_zones", "usfws_wetlands", "county_opposition"}:
+            # These layers typically have STATE or STATE_CODE fields. Query by state abbr.
+            extra_where = f"STATE='{st}'"
+        elif "parcel" in layer_key:
+            # Parcel layers are state-scoped in the registry. No explicit WHERE needed—
+            # already constrained by bbox intersection above + source URL is state-specific.
+            extra_where = None
 
     cap = int(cfg.get("max_records", 4000))
     target = min(limit, cap)

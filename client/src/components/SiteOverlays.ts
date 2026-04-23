@@ -420,29 +420,31 @@ export function enable3DBuildings(map: MLMap): void {
       source: BUILDINGS_SRC,
       'source-layer': 'building',
       minzoom: 13,
+      filter: ['!=', ['get', 'hide_3d'], true],
       paint: {
         'fill-extrusion-color': [
           'interpolate', ['linear'],
-          ['coalesce', ['get', 'render_height'], ['get', 'height'], 6],
-          0,   '#3a4250',
-          20,  '#5a6678',
-          60,  '#8895aa',
-          150, '#c9d4e6',
+          ['coalesce', ['get', 'render_height'], 6],
+          0,   '#7d8aa0',
+          15,  '#9aa6bd',
+          40,  '#c2cee0',
+          90,  '#e6eef8',
+          200, '#ffffff',
         ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>,
         'fill-extrusion-height': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0,
-          14, ['coalesce', ['get', 'render_height'], ['get', 'height'], 6],
+          13,    0,
+          13.5,  ['coalesce', ['get', 'render_height'], 6],
         ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>,
         'fill-extrusion-base': [
-          'coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0,
+          'coalesce', ['get', 'render_min_height'], 0,
         ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>,
-        'fill-extrusion-opacity': 0.85,
+        'fill-extrusion-opacity': 0.92,
+        'fill-extrusion-vertical-gradient': true,
       },
     } as maplibregl.FillExtrusionLayerSpecification)
   }
-  if (map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 700 })
-  if (map.getZoom() < 14.5) map.easeTo({ zoom: 15.2, duration: 700 })
+  // Caller is responsible for flying to a useful zoom/center.
 }
 
 export function disable3DBuildings(map: MLMap): void {

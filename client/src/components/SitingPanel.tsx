@@ -1202,11 +1202,33 @@ export default function SitingPanel() {
       disable3DBuildings(map)
       disableTerrain(map)
       setTerrainOn(false)
-    } else {
-      enableTerrain(map, 1.4)
-      enable3DBuildings(map)
-      setTerrainOn(true)
+      return
     }
+    enableTerrain(map, 1.4)
+    enable3DBuildings(map)
+    setTerrainOn(true)
+    // Buildings only appear at z≥13 — fly to something useful so the user
+    // actually *sees* the change. Priority: selected site → top-ranked site
+    // → a known city in the active state → current center.
+    let target: { lon: number; lat: number } | null = null
+    if (selected && Number.isFinite(selected.lat) && Number.isFinite(selected.lon)) {
+      target = { lon: selected.lon, lat: selected.lat }
+    } else if (sites[0] && Number.isFinite(sites[0].lat) && Number.isFinite(sites[0].lon)) {
+      target = { lon: sites[0].lon, lat: sites[0].lat }
+    } else {
+      const fallback = FALLBACK_SAMPLE_SITES.find(s => s.state === activeState)
+        ?? FALLBACK_SAMPLE_SITES[0]
+      target = { lon: fallback.lon, lat: fallback.lat }
+    }
+    map.flyTo({
+      center: [target.lon, target.lat],
+      zoom: 16,
+      pitch: 62,
+      bearing: -20,
+      speed: 1.0,
+      curve: 1.6,
+      essential: true,
+    })
   }
 
   function flyToDrawn(f: DrawnFeature) {
@@ -1618,15 +1640,27 @@ export default function SitingPanel() {
           {/* 3D terrain toggle */}
           <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
             <Switch size="small" checked={terrainOn} onChange={toggleTerrain} sx={{ p: 0.5 }} />
-            <Tooltip title="3D terrain (AWS Terrarium DEM) + extruded OSM buildings (OpenFreeMap). Zoom to z14+ for buildings." arrow placement="right">
+            <Tooltip title="Flies to selected/top-ranked site at z16 with terrain + extruded OSM buildings (OpenFreeMap). Buildings render at z≥13." arrow placement="right">
               <span style={{ fontSize: 11, color: avalonPalette.whiteDim, letterSpacing: '0.05em' }}>
                 3D MODE · TERRAIN + BUILDINGS {terrainOn && '· ON'}
               </span>
             </Tooltip>
           </Box>
-          <Box sx={{ fontSize: 10, color: avalonPalette.whiteDim, mt: 0.5 }}>
-            Right-drag tilts · Shift-drag rotates · zoom to z14+ for buildings.
-          </Box>
+          {terrainOn && zoom < 13 && (
+            <Box sx={{ fontSize: 10, color: avalonPalette.amber, mt: 0.5 }}>
+              Zoom in to z≥13 (currently z{zoom.toFixed(1)}) to see buildings extrude.
+            </Box>
+          )}
+          {terrainOn && zoom >= 13 && (
+            <Box sx={{ fontSize: 10, color: avalonPalette.cyan, mt: 0.5 }}>
+              Buildings active · right-drag tilts · shift-drag rotates.
+            </Box>
+          )}
+          {!terrainOn && (
+            <Box sx={{ fontSize: 10, color: avalonPalette.whiteDim, mt: 0.5 }}>
+              Toggles terrain DEM + extruded buildings; auto-flies to top site.
+            </Box>
+          )}
         </section>
 
         {error && (

@@ -21,6 +21,19 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import { avalonPalette } from '../theme'
 import SiteDetailsModal from './SiteDetailsModal'
 import {
+  parseKmzOrKml,
+  bboxOfFC,
+  ensureOverlayLayers,
+  setSourceData,
+  IMPORT_SRC,
+  DrawController,
+  type DrawMode,
+  type DrawnFeature,
+  enableTerrain,
+  disableTerrain,
+  downloadGeoJSON,
+} from './SiteOverlays'
+import {
   fetchSitingFactors,
   fetchSitingSample,
   fetchSitingLiveLayers,
@@ -434,6 +447,18 @@ export default function SitingPanel() {
 
   const [stubCoverage, setStubCoverage] = useState<Record<string, number>>({})
 
+  // ── Site overlays · KMZ import + drawing + 3D terrain ─────────────────
+  const drawCtrlRef = useRef<DrawController | null>(null)
+  const importedFCRef = useRef<GeoJSON.FeatureCollection | null>(null)
+  const drawnFeaturesRef = useRef<DrawnFeature[]>([])
+  const [importedName, setImportedName] = useState<string | null>(null)
+  const [importedCount, setImportedCount] = useState<number>(0)
+  const [drawnFeatures, setDrawnFeatures] = useState<DrawnFeature[]>([])
+  const [drawMode, setDrawMode] = useState<DrawMode>('none')
+  const [terrainOn, setTerrainOn] = useState<boolean>(false)
+  const [overlayErr, setOverlayErr] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
   const [coverage, setCoverage] = useState<CoverageReport | null>(null)
   const [coverageLoading, setCoverageLoading] = useState(false)
   const [coverageErr, setCoverageErr] = useState<string | null>(null)
@@ -584,10 +609,23 @@ export default function SitingPanel() {
       mapRef.current = map
       setMapReady(true)
       updateBbox()
+      // Initialize KMZ-import + drawn-feature sources/layers and the drawing
+      // controller. These persist across the map's lifetime; basemap swaps
+      // re-add them via the styledata handler below.
+      ensureOverlayLayers(map)
+      drawCtrlRef.current = new DrawController(map, (fs) => {
+        drawnFeaturesRef.current = fs
+        setDrawnFeatures([...fs])
+      })
     })
     map.on('moveend', updateBbox)
     map.on('zoomend', updateBbox)
-    return () => { map.remove(); mapRef.current = null }
+    return () => {
+      drawCtrlRef.current?.destroy()
+      drawCtrlRef.current = null
+      map.remove()
+      mapRef.current = null
+    }
   }, [basemap])
 
   // ── candidate site source/layer (re-render when sites change) ─────────
@@ -1034,6 +1072,12 @@ export default function SitingPanel() {
       // Drop tracked listener refs — the layers they pointed to no longer exist.
       overlayHandlersRef.current.clear()
       setSites(s => [...s])
+      // Re-add KMZ-import + drawn-feature layers and re-hydrate their data.
+      ensureOverlayLayers(map)
+      if (importedFCRef.current) setSourceData(map, IMPORT_SRC, importedFCRef.current)
+      // DrawController re-renders into DRAWN_SRC on next setMode/setFeatures call.
+      drawCtrlRef.current?.setFeatures(drawnFeaturesRef.current)
+      if (terrainOn) enableTerrain(map)
       for (const [key, on] of Object.entries(enabledLayers)) {
         if (on) reloadOverlay(key)
       }
@@ -1078,6 +1122,95 @@ export default function SitingPanel() {
     if (!map) return
     map.flyTo({ center: [s.lon, s.lat], zoom: 8.5, speed: 1.4 })
     setSelectedId(s.site_id)
+  }
+
+  // ── Site-overlay handlers ─────────────────────────────────────────────
+  async function handleOverlayFile(file: File) {
+    setOverlayErr(null)
+    try {
+      const { name, fc } = await parseKmzOrKml(file)
+      const map = mapRef.current
+      if (!map) return
+      ensureOverlayLayers(map)
+      setSourceData(map, IMPORT_SRC, fc)
+      importedFCRef.current = fc
+      setImportedName(name)
+      setImportedCount(fc.features.length)
+      const bb = bboxOfFC(fc)
+      if (bb) {
+        map.fitBounds(
+          [[bb[0], bb[1]], [bb[2], bb[3]]] as LngLatBoundsLike,
+          { padding: 80, duration: 900, maxZoom: 16 },
+        )
+      }
+    } catch (e) {
+      setOverlayErr(String((e as Error).message ?? e))
+    }
+  }
+
+  function clearImportedOverlay() {
+    const map = mapRef.current
+    if (!map) return
+    setSourceData(map, IMPORT_SRC, { type: 'FeatureCollection', features: [] })
+    importedFCRef.current = null
+    setImportedName(null)
+    setImportedCount(0)
+  }
+
+  function changeDrawMode(next: DrawMode) {
+    const ctrl = drawCtrlRef.current
+    if (!ctrl) return
+    const target = drawMode === next ? 'none' : next
+    ctrl.setMode(target)
+    setDrawMode(target)
+  }
+
+  function deleteDrawn(id: string) {
+    drawCtrlRef.current?.removeFeature(id)
+  }
+
+  function relabelDrawn(id: string) {
+    const f = drawnFeaturesRef.current.find((x) => x.properties.id === id)
+    if (!f) return
+    const next = window.prompt('Annotation label', f.properties.label) ?? f.properties.label
+    drawCtrlRef.current?.updateLabel(id, next)
+  }
+
+  function clearAllDrawn() {
+    if (!window.confirm('Clear all drawn shapes & annotations?')) return
+    drawCtrlRef.current?.clearAll()
+  }
+
+  function exportAnnotations() {
+    const fc: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: drawnFeaturesRef.current as GeoJSON.Feature[],
+    }
+    const stamp = new Date().toISOString().slice(0, 10)
+    downloadGeoJSON(fc, `avalon-annotations-${stamp}.geojson`)
+  }
+
+  function toggleTerrain() {
+    const map = mapRef.current
+    if (!map) return
+    if (terrainOn) {
+      disableTerrain(map)
+      setTerrainOn(false)
+    } else {
+      enableTerrain(map, 1.4)
+      setTerrainOn(true)
+    }
+  }
+
+  function flyToDrawn(f: DrawnFeature) {
+    const map = mapRef.current
+    if (!map) return
+    const geom: any = f.geometry
+    let lon = 0, lat = 0
+    if (geom.type === 'Point') { [lon, lat] = geom.coordinates }
+    else if (geom.type === 'LineString') { [lon, lat] = geom.coordinates[0] }
+    else if (geom.type === 'Polygon') { [lon, lat] = geom.coordinates[0][0] }
+    map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 13), speed: 1.4 })
   }
 
   const ranked = useMemo(
@@ -1369,6 +1502,124 @@ export default function SitingPanel() {
             {scoring ? 'SCORING…' : 'RESCORE'}
           </Button>
           {scoring && <LinearProgress sx={{ mt: 0.5 }} />}
+        </section>
+
+        <section className="siting-block">
+          <div className="siting-block-head">
+            <span>SITE OVERLAYS · 3D</span>
+            <span className="siting-block-meta">KMZ · DRAW · TERRAIN</span>
+          </div>
+
+          {/* KMZ / KML import */}
+          <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1, mb: 1 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".kmz,.kml,.geojson,.json"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) handleOverlayFile(f)
+                if (fileInputRef.current) fileInputRef.current.value = ''
+              }}
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => fileInputRef.current?.click()}
+              sx={{ flex: 1, fontSize: 11, color: avalonPalette.cyan, borderColor: avalonPalette.border }}
+            >
+              UPLOAD KMZ / KML
+            </Button>
+            {importedName && (
+              <Button
+                size="small"
+                variant="text"
+                onClick={clearImportedOverlay}
+                sx={{ minWidth: 0, color: avalonPalette.whiteDim, fontSize: 10 }}
+              >clear</Button>
+            )}
+          </Box>
+          {importedName && (
+            <Box sx={{ fontSize: 10, color: avalonPalette.whiteDim, mb: 1, letterSpacing: '0.04em' }}>
+              {importedName} · {importedCount} feature{importedCount === 1 ? '' : 's'}
+            </Box>
+          )}
+          {overlayErr && (
+            <Box sx={{ fontSize: 10, color: '#ff8a8a', mb: 1 }}>{overlayErr}</Box>
+          )}
+
+          {/* Draw mode toggle */}
+          <ToggleButtonGroup
+            value={drawMode === 'none' ? null : drawMode}
+            exclusive
+            size="small"
+            onChange={(_, v) => changeDrawMode((v ?? 'none') as DrawMode)}
+            sx={{ width: '100%', mb: 1, '& .MuiToggleButton-root': { flex: 1, fontSize: 10 } }}
+          >
+            <ToggleButton value="point">PIN</ToggleButton>
+            <ToggleButton value="line">LINE</ToggleButton>
+            <ToggleButton value="polygon">POLY</ToggleButton>
+          </ToggleButtonGroup>
+          {drawMode !== 'none' && (
+            <Box sx={{ fontSize: 10, color: avalonPalette.amber, mb: 1, letterSpacing: '0.04em' }}>
+              {drawMode === 'point'
+                ? 'Click map to drop a marker.'
+                : `Click to add vertices · double-click to finish ${drawMode}.`}
+            </Box>
+          )}
+
+          {/* Annotations list */}
+          {drawnFeatures.length > 0 && (
+            <ul className="layer-list" style={{ marginBottom: 6 }}>
+              {drawnFeatures.map((f) => (
+                <li key={f.properties.id} className="layer-row on" style={{ alignItems: 'center' }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 0.5, flex: 1, minWidth: 0 }}>
+                    <span className="layer-dot" style={{ background: avalonPalette.amber }} />
+                    <Tooltip title={`${f.properties.kind} · click to fly`} placement="right" arrow>
+                      <span
+                        className="layer-name"
+                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                        onClick={() => flyToDrawn(f)}
+                      >{f.properties.label || f.properties.kind}</span>
+                    </Tooltip>
+                  </Box>
+                  <Button size="small" variant="text" onClick={() => relabelDrawn(f.properties.id)} sx={{ minWidth: 0, p: 0.25, color: avalonPalette.cyan, fontSize: 10 }}>edit</Button>
+                  <Button size="small" variant="text" onClick={() => deleteDrawn(f.properties.id)} sx={{ minWidth: 0, p: 0.25, color: '#ff8a8a', fontSize: 10 }}>×</Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <Box sx={{ display: 'flex', flexDirection: 'row', gap: 0.5, mb: 1 }}>
+            <Button
+              size="small"
+              variant="text"
+              disabled={drawnFeatures.length === 0}
+              onClick={exportAnnotations}
+              sx={{ flex: 1, fontSize: 10, color: avalonPalette.cyan }}
+            >EXPORT</Button>
+            <Button
+              size="small"
+              variant="text"
+              disabled={drawnFeatures.length === 0}
+              onClick={clearAllDrawn}
+              sx={{ flex: 1, fontSize: 10, color: '#ff8a8a' }}
+            >CLEAR ALL</Button>
+          </Box>
+
+          {/* 3D terrain toggle */}
+          <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
+            <Switch size="small" checked={terrainOn} onChange={toggleTerrain} sx={{ p: 0.5 }} />
+            <Tooltip title="3D terrain via AWS Open Data Terrarium tiles · drag with right-mouse to tilt" arrow placement="right">
+              <span style={{ fontSize: 11, color: avalonPalette.whiteDim, letterSpacing: '0.05em' }}>
+                3D TERRAIN {terrainOn && '· ON'}
+              </span>
+            </Tooltip>
+          </Box>
+          <Box sx={{ fontSize: 10, color: avalonPalette.whiteDim, mt: 0.5 }}>
+            Right-drag tilts · Shift-drag rotates · scroll zooms.
+          </Box>
         </section>
 
         {error && (

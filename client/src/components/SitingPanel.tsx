@@ -31,6 +31,8 @@ import {
   type DrawnFeature,
   enableTerrain,
   disableTerrain,
+  enable3DBuildings,
+  disable3DBuildings,
   downloadGeoJSON,
 } from './SiteOverlays'
 import {
@@ -1077,7 +1079,10 @@ export default function SitingPanel() {
       if (importedFCRef.current) setSourceData(map, IMPORT_SRC, importedFCRef.current)
       // DrawController re-renders into DRAWN_SRC on next setMode/setFeatures call.
       drawCtrlRef.current?.setFeatures(drawnFeaturesRef.current)
-      if (terrainOn) enableTerrain(map)
+      if (terrainOn) {
+        enableTerrain(map)
+        enable3DBuildings(map)
+      }
       for (const [key, on] of Object.entries(enabledLayers)) {
         if (on) reloadOverlay(key)
       }
@@ -1194,10 +1199,12 @@ export default function SitingPanel() {
     const map = mapRef.current
     if (!map) return
     if (terrainOn) {
+      disable3DBuildings(map)
       disableTerrain(map)
       setTerrainOn(false)
     } else {
       enableTerrain(map, 1.4)
+      enable3DBuildings(map)
       setTerrainOn(true)
     }
   }
@@ -1611,14 +1618,14 @@ export default function SitingPanel() {
           {/* 3D terrain toggle */}
           <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
             <Switch size="small" checked={terrainOn} onChange={toggleTerrain} sx={{ p: 0.5 }} />
-            <Tooltip title="3D terrain via AWS Open Data Terrarium tiles · drag with right-mouse to tilt" arrow placement="right">
+            <Tooltip title="3D terrain (AWS Terrarium DEM) + extruded OSM buildings (OpenFreeMap). Zoom to z14+ for buildings." arrow placement="right">
               <span style={{ fontSize: 11, color: avalonPalette.whiteDim, letterSpacing: '0.05em' }}>
-                3D TERRAIN {terrainOn && '· ON'}
+                3D MODE · TERRAIN + BUILDINGS {terrainOn && '· ON'}
               </span>
             </Tooltip>
           </Box>
           <Box sx={{ fontSize: 10, color: avalonPalette.whiteDim, mt: 0.5 }}>
-            Right-drag tilts · Shift-drag rotates · scroll zooms.
+            Right-drag tilts · Shift-drag rotates · zoom to z14+ for buildings.
           </Box>
         </section>
 

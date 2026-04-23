@@ -393,6 +393,63 @@ export function disableTerrain(map: MLMap): void {
   if (map.getPitch() > 0) map.easeTo({ pitch: 0, bearing: 0, duration: 500 })
 }
 
+// ── 3D buildings ────────────────────────────────────────────────────────────
+// OpenFreeMap (free, no key) hosts OpenMapTiles-schema vector tiles whose
+// `building` source-layer carries `render_height` / `render_min_height`
+// fields populated from OSM `height`, `building:levels`, etc. We pull just
+// that single source-layer and extrude it client-side, which works on top
+// of any current basemap (raster USGS imagery, dark MapLibre style, etc.).
+
+export const BUILDINGS_SRC = 'avalon-openfreemap'
+export const BUILDINGS_LYR = 'avalon-3d-buildings'
+const OPENFREEMAP_TILEJSON = 'https://tiles.openfreemap.org/planet'
+const OPENFREEMAP_ATTR = '© <a href="https://openfreemap.org">OpenFreeMap</a> · © <a href="https://www.openmaptiles.org/">OpenMapTiles</a> · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+
+export function enable3DBuildings(map: MLMap): void {
+  if (!map.getSource(BUILDINGS_SRC)) {
+    map.addSource(BUILDINGS_SRC, {
+      type: 'vector',
+      url: OPENFREEMAP_TILEJSON,
+      attribution: OPENFREEMAP_ATTR,
+    } as maplibregl.VectorSourceSpecification)
+  }
+  if (!map.getLayer(BUILDINGS_LYR)) {
+    map.addLayer({
+      id: BUILDINGS_LYR,
+      type: 'fill-extrusion',
+      source: BUILDINGS_SRC,
+      'source-layer': 'building',
+      minzoom: 13,
+      paint: {
+        'fill-extrusion-color': [
+          'interpolate', ['linear'],
+          ['coalesce', ['get', 'render_height'], ['get', 'height'], 6],
+          0,   '#3a4250',
+          20,  '#5a6678',
+          60,  '#8895aa',
+          150, '#c9d4e6',
+        ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>,
+        'fill-extrusion-height': [
+          'interpolate', ['linear'], ['zoom'],
+          13, 0,
+          14, ['coalesce', ['get', 'render_height'], ['get', 'height'], 6],
+        ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>,
+        'fill-extrusion-base': [
+          'coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0,
+        ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>,
+        'fill-extrusion-opacity': 0.85,
+      },
+    } as maplibregl.FillExtrusionLayerSpecification)
+  }
+  if (map.getPitch() < 30) map.easeTo({ pitch: 60, duration: 700 })
+  if (map.getZoom() < 14.5) map.easeTo({ zoom: 15.2, duration: 700 })
+}
+
+export function disable3DBuildings(map: MLMap): void {
+  if (map.getLayer(BUILDINGS_LYR)) map.removeLayer(BUILDINGS_LYR)
+  if (map.getSource(BUILDINGS_SRC)) map.removeSource(BUILDINGS_SRC)
+}
+
 // ── Export helpers ──────────────────────────────────────────────────────────
 
 export function downloadGeoJSON(fc: GeoJSON.FeatureCollection, filename: string): void {

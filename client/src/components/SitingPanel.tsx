@@ -19,6 +19,7 @@ import Chip from '@mui/material/Chip'
 import LinearProgress from '@mui/material/LinearProgress'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { avalonPalette } from '../theme'
+import SiteDetailsModal from './SiteDetailsModal'
 import {
   fetchSitingFactors,
   fetchSitingSample,
@@ -404,6 +405,8 @@ export default function SitingPanel() {
   const [sites, setSites] = useState<SiteResultDTO[]>([])
   const [siteInputs, setSiteInputs] = useState<SiteInput[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [detailSite, setDetailSite] = useState<SiteResultDTO | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
   const [scoring, setScoring] = useState(false)
   const [layerStatus, setLayerStatus] = useState<Record<string, 'idle' | 'loading' | 'ok' | 'missing' | 'error'>>({})
   const [error, setError] = useState<string | null>(null)
@@ -1605,6 +1608,95 @@ export default function SitingPanel() {
         <div className="siting-side-head">
           <span className="siting-title">TOP {displayedRanked.length} · {activeState}</span>
           <span className="siting-sub">{archetype}</span>
+          <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto' }}>
+            <Tooltip title="Export as GeoJSON">
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => {
+                  const fc = {
+                    type: 'FeatureCollection' as const,
+                    features: displayedRanked.map(s => ({
+                      type: 'Feature' as const,
+                      geometry: { type: 'Point' as const, coordinates: [s.lon, s.lat] },
+                      properties: {
+                        site_id: s.site_id,
+                        composite: s.composite,
+                        ...Object.fromEntries(
+                          Object.entries(s.factors).map(([k, f]) => [
+                            `factor_${k}`,
+                            { normalized: f.normalized, weighted: f.weighted, stub: f.stub },
+                          ])
+                        ),
+                        kill_flags: s.kill_flags,
+                      },
+                    })),
+                  }
+                  const blob = new Blob([JSON.stringify(fc, null, 2)], { type: 'application/geo+json' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `avalon-sites-${activeState}-${new Date().toISOString().slice(0, 10)}.geojson`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+                sx={{
+                  fontFamily: '"VT323", monospace',
+                  fontSize: 10,
+                  color: avalonPalette.cyan,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.1em',
+                  p: 0.5,
+                  '&:hover': { color: avalonPalette.cyanDim },
+                }}
+              >
+                GeoJSON
+              </Button>
+            </Tooltip>
+            <Tooltip title="Export as CSV">
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => {
+                  const headers = ['site_id', 'latitude', 'longitude', 'composite', 'killed', ...Object.keys(displayedRanked[0]?.factors || {})]
+                  const rows = displayedRanked.map(s => [
+                    s.site_id,
+                    s.lat,
+                    s.lon,
+                    s.composite,
+                    Object.values(s.kill_flags).some(Boolean) ? 'YES' : 'NO',
+                    ...Object.entries(s.factors).map(([, f]) => f.normalized.toFixed(3)),
+                  ])
+                  const escapeCsvField = (v: any) => {
+                    const str = String(v)
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                      return `"${str.replace(/"/g, '""')}"`
+                    }
+                    return str
+                  }
+                  const csv = [headers.map(escapeCsvField).join(','), ...rows.map(r => r.map(escapeCsvField).join(','))].join('\n')
+                  const blob = new Blob([csv], { type: 'text/csv' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `avalon-sites-${activeState}-${new Date().toISOString().slice(0, 10)}.csv`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+                sx={{
+                  fontFamily: '"VT323", monospace',
+                  fontSize: 10,
+                  color: avalonPalette.amber,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.1em',
+                  p: 0.5,
+                  '&:hover': { color: avalonPalette.amberDim },
+                }}
+              >
+                CSV
+              </Button>
+            </Tooltip>
+          </Box>
         </div>
         <ol className="rank-list">
           {displayedRanked.map((s, i) => {
@@ -1613,7 +1705,11 @@ export default function SitingPanel() {
               <li
                 key={s.site_id}
                 className={`rank-row ${selectedId === s.site_id ? 'sel' : ''} ${killed ? 'killed' : ''}`}
-                onClick={() => flyTo(s)}
+                onClick={() => {
+                  flyTo(s)
+                  setDetailSite(s)
+                  setDetailOpen(true)
+                }}
               >
                 <span className="rank-idx">{i + 1}</span>
                 <span className="rank-id">{s.site_id}</span>
@@ -1626,6 +1722,8 @@ export default function SitingPanel() {
           })}
         </ol>
       </aside>
+
+      <SiteDetailsModal site={detailSite} open={detailOpen} onClose={() => setDetailOpen(false)} />
     </div>
   )
 }

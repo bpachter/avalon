@@ -202,7 +202,9 @@ export async function fetchSitingProxyGeoJSON(
       try { j = await r.json() } catch { /* ignore */ }
       return { error: j.error ?? `HTTP ${r.status}` }
     }
-    const data = await parseJsonOrThrow(r, `siting/proxy/${layerKey}`)
+    const data = await parseJsonOrThrow(r, `siting/proxy/${layerKey}`) as
+      | { type: 'FeatureCollection'; features: unknown[]; _meta: Record<string, unknown> }
+      | { error: string }
     _proxyClientCachePut(cacheKey, data)
     return data
   } catch (e) {

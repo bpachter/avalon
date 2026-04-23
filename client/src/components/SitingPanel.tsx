@@ -2,6 +2,23 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import maplibregl, { Map as MLMap } from 'maplibre-gl'
 import type { LngLatBoundsLike } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+// MUI primitives — used for the panel chrome (controls, sliders, switches,
+// list rows). Map + legend + parcel popup remain hand-rolled because
+// MapLibre overlays render outside React anyway.
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
+import Select from '@mui/material/Select'
+import MenuItem from '@mui/material/MenuItem'
+import ListSubheader from '@mui/material/ListSubheader'
+import Switch from '@mui/material/Switch'
+import Slider from '@mui/material/Slider'
+import Tooltip from '@mui/material/Tooltip'
+import Chip from '@mui/material/Chip'
+import LinearProgress from '@mui/material/LinearProgress'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import { avalonPalette } from '../theme'
 import {
   fetchSitingFactors,
   fetchSitingSample,
@@ -698,11 +715,14 @@ export default function SitingPanel() {
     const myGen = (overlayGenRef.current.get(key) ?? 0) + 1
     overlayGenRef.current.set(key, myGen)
     // Keep parcel payloads small at lower zooms; ramp detail as user zooms in.
-    // This makes parcel outlines usable at z13 without stalling the map.
+    // Limits roughly doubled now that the backend pages parcel feeds in
+    // parallel + serves them gzipped — at z12 we can afford ~800 parcels
+    // for a "regional density" read, then ~2000 once the user zooms in.
     const parcelLimit =
-      zoom < 13.5 ? 350 :
-      zoom < 14.5 ? 700 :
-      1200
+      zoom < 12.5 ? 800 :
+      zoom < 13.5 ? 1500 :
+      zoom < 14.5 ? 2500 :
+      4000
     // For fiber: INVERSE of parcels. Higher zoom = smaller bbox = need FEWER features.
     // This keeps response times fast even at high zoom levels.
     const fiberLimit =
@@ -922,7 +942,7 @@ export default function SitingPanel() {
     
     // Determine which zoom threshold we're in (affects request limits for fiber/parcels)
     const fiberThreshold = zoom < 6 ? 0 : zoom < 8 ? 1 : 2
-    const parcelThreshold = zoom < 13.5 ? 0 : zoom < 14.5 ? 1 : 2
+    const parcelThreshold = zoom < 12.5 ? 0 : zoom < 13.5 ? 1 : zoom < 14.5 ? 2 : 3
     const maxThreshold = Math.max(fiberThreshold, parcelThreshold)
     
     const prevThreshold = prevZoomThresholdRef.current
@@ -1125,44 +1145,46 @@ export default function SitingPanel() {
 
         <section className="siting-block">
           <div className="siting-block-head">ARCHETYPE</div>
-          <div className="archetype-row">
+          <ToggleButtonGroup
+            value={archetype}
+            exclusive
+            size="small"
+            onChange={(_, v) => v && setArchetype(v as Archetype)}
+            sx={{ width: '100%', '& .MuiToggleButton-root': { flex: 1 } }}
+          >
             {ARCHETYPES.map(a => (
-              <button
-                key={a}
-                className={`arch-btn ${archetype === a ? 'active' : ''}`}
-                onClick={() => setArchetype(a)}
-              >{a.toUpperCase()}</button>
+              <ToggleButton key={a} value={a}>{a.toUpperCase()}</ToggleButton>
             ))}
-          </div>
+          </ToggleButtonGroup>
         </section>
 
         <section className="siting-block">
           <div className="siting-block-head">STATE</div>
-          <div className="state-row">
-            <select
-              className="state-select"
+          <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
+            <Select
               value={activeState}
-              onChange={(e) => setActiveState(e.target.value)}
+              onChange={(e) => setActiveState(e.target.value as string)}
+              size="small"
+              sx={{ minWidth: 90 }}
             >
-              {stateOptions.length === 0 ? (
-                <option value="NC">NC</option>
-              ) : (
-                <>
-                  <optgroup label="Duke territory">
-                    {stateOptions.filter(s => s.duke).map(s => (
-                      <option key={s.code} value={s.code}>{s.code}</option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Other">
-                    {stateOptions.filter(s => !s.duke).map(s => (
-                      <option key={s.code} value={s.code}>{s.code}</option>
-                    ))}
-                  </optgroup>
-                </>
+              {stateOptions.length === 0 && (
+                <MenuItem value="NC">NC</MenuItem>
               )}
-            </select>
-            <span className="state-hint">filters power layers + flies map</span>
-          </div>
+              {stateOptions.length > 0 && [
+                <ListSubheader key="duke-hdr" sx={{ background: 'transparent', color: avalonPalette.amber, lineHeight: '24px', fontFamily: '"VT323", monospace', letterSpacing: '0.18em' }}>Duke territory</ListSubheader>,
+                ...stateOptions.filter(s => s.duke).map(s => (
+                  <MenuItem key={s.code} value={s.code}>{s.code}</MenuItem>
+                )),
+                <ListSubheader key="other-hdr" sx={{ background: 'transparent', color: avalonPalette.amber, lineHeight: '24px', fontFamily: '"VT323", monospace', letterSpacing: '0.18em' }}>Other</ListSubheader>,
+                ...stateOptions.filter(s => !s.duke).map(s => (
+                  <MenuItem key={s.code} value={s.code}>{s.code}</MenuItem>
+                )),
+              ]}
+            </Select>
+            <Box sx={{ fontSize: 10, color: avalonPalette.whiteDim, letterSpacing: '0.05em' }}>
+              filters power layers + flies map
+            </Box>
+          </Box>
         </section>
 
         <section className="siting-block">
@@ -1195,15 +1217,18 @@ export default function SitingPanel() {
                     st === 'ok'      ? '●' : ''
                   return (
                     <li key={l.key} className={`layer-row ${enabledLayers[l.key] ? 'on' : ''} ${layerStatus[l.key] === 'loading' ? 'is-loading' : ''}`}>
-                      <label>
-                        <input
-                          type="checkbox"
+                      <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 0.5, flex: 1, minWidth: 0 }}>
+                        <Switch
+                          size="small"
                           checked={!!enabledLayers[l.key]}
                           onChange={() => toggleLayer(l.key)}
+                          sx={{ p: 0.5 }}
                         />
                         <span className="layer-dot" style={{ background: l.color }} />
-                        <span className="layer-name">{prettyLayerName(l)}</span>
-                      </label>
+                        <Tooltip title={`${l.source} · z≥${l.min_zoom}`} placement="right" arrow>
+                          <span className="layer-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prettyLayerName(l)}</span>
+                        </Tooltip>
+                      </Box>
                       <span className="layer-note">{note}</span>
                     </li>
                   )
@@ -1219,11 +1244,14 @@ export default function SitingPanel() {
         <section className="siting-block dq-block">
           <div className="siting-block-head">
             <span>DATA QUALITY · {activeState}</span>
-            <button
-              className="link-btn"
+            <Button
+              size="small"
+              variant="text"
+              startIcon={<RefreshIcon sx={{ fontSize: 14 }} />}
               onClick={() => refreshCoverage(activeState)}
               disabled={coverageLoading}
-            >{coverageLoading ? '…' : 'refresh'}</button>
+              sx={{ minWidth: 0, px: 0.5, color: avalonPalette.cyan, fontSize: 10 }}
+            >{coverageLoading ? '…' : 'refresh'}</Button>
           </div>
           {coverageErr && <div className="dq-err">{coverageErr}</div>}
           {!coverage && !coverageErr && !coverageLoading && (
@@ -1285,7 +1313,7 @@ export default function SitingPanel() {
         <section className="siting-block weights-block">
           <div className="siting-block-head">
             <span>WEIGHTS · {archetype}</span>
-            <button className="link-btn" onClick={resetWeights}>reset</button>
+            <Button size="small" variant="text" onClick={resetWeights} sx={{ minWidth: 0, px: 0.5, color: avalonPalette.cyan, fontSize: 10 }}>reset</Button>
           </div>
           {factorList.length > 0 && Object.keys(stubCoverage).length > 0 && (() => {
             const real = factorList.filter(f => (stubCoverage[f] ?? 1) < 1).length
@@ -1308,31 +1336,42 @@ export default function SitingPanel() {
                   <div className="weight-row-head">
                     <span className="factor-name">
                       {f}
-                      {stubbed && <span className="factor-tag" title="imputed from cohort median (no real data yet)"> · STUB</span>}
+                      {stubbed && <Chip size="small" label="STUB" sx={{ ml: 0.5, height: 14, fontSize: 9, color: avalonPalette.whiteDim, borderColor: avalonPalette.border }} title="imputed from cohort median (no real data yet)" />}
                     </span>
                     <span className="factor-val" title="effective normalized weight across live factors">
                       {(cur * 100).toFixed(0)} · eff {eff.toFixed(0)}
                     </span>
                   </div>
-                  <input
-                    type="range" min={0} max={0.30} step={0.01}
+                  <Slider
                     value={cur}
+                    min={0}
+                    max={0.30}
+                    step={0.01}
                     disabled={stubbed}
-                    onChange={(e) => setWeight(f, parseFloat(e.target.value))}
+                    onChange={(_, v) => setWeight(f, Array.isArray(v) ? v[0] : v)}
+                    sx={{ mt: 0.25 }}
                   />
                 </div>
               )
             })}
           </div>
-          <button className="primary-btn" onClick={rescoreAll} disabled={scoring}>
+          <Button
+            variant="contained"
+            color="primary"
+            fullWidth
+            onClick={rescoreAll}
+            disabled={scoring}
+            sx={{ mt: 1 }}
+          >
             {scoring ? 'SCORING…' : 'RESCORE'}
-          </button>
+          </Button>
+          {scoring && <LinearProgress sx={{ mt: 0.5 }} />}
         </section>
 
         {error && (
           <div className="siting-err">
             <span>{error}</span>
-            <button className="link-btn" onClick={loadCatalog}>retry</button>
+            <Button size="small" variant="text" onClick={loadCatalog} sx={{ color: avalonPalette.cyan, fontSize: 10 }}>retry</Button>
           </div>
         )}
       </aside>

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -33,6 +34,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Gzip every JSON response > 1 KB. Parcel + transmission payloads
+# routinely exceed 100 KB and compress 6–10×, which is the single
+# largest wire-time win available without touching upstreams.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 # ---------------------------------------------------------------------------
 # Scoring engine import
@@ -380,6 +386,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # request. Keep page_size small and rely on pagination to assemble the
         # viewport's polygons.
         "source": "FEMA NFHL", "max_records": 50000, "page_size": 500,
+        "parallel_pages": True,
     },
     "usfws_wetlands": {
         "name": "USFWS wetlands (NWI)", "group": "Hazards & environment",
@@ -396,6 +403,7 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # "where the green is" read for site-screening at the regional view.
         "geom": "polygon", "color": "#3ad6a0", "min_zoom": 7,
         "source": "USFWS NWI", "max_records": 50000, "page_size": 1000,
+        "parallel_pages": True,
     },
     "county_subdivisions": {
         "name": "County subdivisions", "group": "Boundaries",
@@ -457,9 +465,10 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "name": "Parcel outlines (NC)", "group": "Boundaries",
         "url": f"{_NCONEMAP}/NC1Map_Parcels/FeatureServer/1",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
-        "source": "NC OneMap", "max_records": 2000, "page_size": 500,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 12,
+        "source": "NC OneMap", "max_records": 4000, "page_size": 1000,
         "simplify_min_offset": 0.00008, "geometry_precision": 6,
+        "parallel_pages": True,
         "state": "NC",
     },
     "sc_parcels": {
@@ -468,36 +477,40 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # we could reach without a token. Future: add additional county feeds.
         "url": "https://services1.arcgis.com/2AGLxyiJoNiVHKwq/arcgis/rest/services/Parcels/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
-        "source": "York County SC GIS", "max_records": 2000, "page_size": 500,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 12,
+        "source": "York County SC GIS", "max_records": 4000, "page_size": 1000,
         "simplify_min_offset": 0.00008, "geometry_precision": 6,
+        "parallel_pages": True,
         "state": "SC",
     },
     "fl_parcels": {
         "name": "Parcel outlines (FL)", "group": "Boundaries",
         "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
-        "source": "FDOR Cadastral (FL DOR)", "max_records": 1500, "page_size": 500,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 12,
+        "source": "FDOR Cadastral (FL DOR)", "max_records": 4000, "page_size": 1000,
         "simplify_min_offset": 0.00008, "geometry_precision": 6,
+        "parallel_pages": True,
         "state": "FL",
     },
     "in_parcels": {
         "name": "Parcel outlines (IN)", "group": "Boundaries",
         "url": "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
-        "source": "IndianaMap (IGIO)", "max_records": 2000, "page_size": 500,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 12,
+        "source": "IndianaMap (IGIO)", "max_records": 4000, "page_size": 1000,
         "simplify_min_offset": 0.00008, "geometry_precision": 6,
+        "parallel_pages": True,
         "state": "IN",
     },
     "oh_parcels": {
         "name": "Parcel outlines (OH)", "group": "Boundaries",
         "url": "https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
-        "source": "OGRIP Ohio Statewide Parcels", "max_records": 2000, "page_size": 500,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 12,
+        "source": "OGRIP Ohio Statewide Parcels", "max_records": 4000, "page_size": 1000,
         "simplify_min_offset": 0.00008, "geometry_precision": 6,
+        "parallel_pages": True,
         "state": "OH",
     },
     "ky_parcels": {
@@ -506,9 +519,10 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # style parcel feed we could reach without a token. Future: add more.
         "url": "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/New_AllParcels/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "polygon", "color": "#fff04a", "min_zoom": 13,
-        "source": "Jefferson County KY PVA", "max_records": 2000, "page_size": 500,
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 12,
+        "source": "Jefferson County KY PVA", "max_records": 4000, "page_size": 1000,
         "simplify_min_offset": 0.00008, "geometry_precision": 6,
+        "parallel_pages": True,
         "state": "KY",
     },
 }
@@ -1663,6 +1677,109 @@ def _simplify_features(features: list[dict], geom_type: str, zoom: float | None)
     return out, dropped
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Parallel ArcGIS pagination
+#
+# Parcel feeds (NC OneMap, FL DOR, Indiana, Ohio, etc.) cap a single
+# query at 500–2000 records. When the user is at z12–z14 we routinely
+# need 1k–4k features, which previously meant 4–8 *serial* HTTP round
+# trips with ~250 ms each → 1–2 s of latency that gated map paint.
+#
+# This helper fires all expected pages concurrently against the same
+# source URL, then de-dupes by feature signature. For parcel layers
+# this collapses the 4–8 serial requests into a single ~300 ms wall
+# clock window. The proxy still falls back to serial paging for layers
+# that don't opt in (or when the parallel batch hits an upstream error).
+# ─────────────────────────────────────────────────────────────────────
+def _fetch_arcgis_pages_parallel(
+    cfg: dict,
+    source_url: str,
+    bbox_t: tuple,
+    *,
+    target: int,
+    page_size: int,
+    extra_where: str | None,
+    layer_key: str,
+    seen: set[str],
+    feats: list[dict],
+    source_breakdown: dict[str, int],
+    source_key: str,
+    max_workers: int = 6,
+) -> tuple[bool, str | None]:
+    """Page through an ArcGIS source in parallel. Mutates ``seen`` / ``feats``.
+
+    Returns ``(truncated, warning)``. A non-None warning means at least one
+    page failed; the caller can decide whether to fall back to a mirror.
+    """
+    import math
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    n_pages = max(1, math.ceil(target / page_size))
+    offsets = [i * page_size for i in range(n_pages)]
+    urls = [
+        _arcgis_query_url_for_source(
+            cfg, source_url, bbox_t,
+            page_size=min(page_size, target),
+            offset=off,
+            extra_where=extra_where,
+        )
+        for off in offsets
+    ]
+
+    truncated = False
+    warning: str | None = None
+    # Preserve page order so feature ordering is deterministic across runs
+    # (helps debugging + hash-stable response bodies for the cache).
+    results: list[tuple[int, list[dict] | None, str | None]] = [(i, None, None) for i in range(n_pages)]
+
+    def _fetch_one(idx: int, url: str) -> tuple[int, list[dict] | None, str | None]:
+        try:
+            r = _resilient_get(url, timeout=30, retries=2)
+        except Exception as exc:  # noqa: BLE001
+            return idx, None, f"{type(exc).__name__}: {exc}"
+        if r.status_code != 200:
+            return idx, None, f"HTTP {r.status_code}"
+        try:
+            data = r.json()
+        except Exception:
+            return idx, None, "non-JSON response"
+        if isinstance(data, dict) and "error" in data and "features" not in data:
+            return idx, None, f"upstream error: {data.get('error')}"
+        return idx, (data.get("features") or []), None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futs = [pool.submit(_fetch_one, i, u) for i, u in enumerate(urls)]
+        for fut in as_completed(futs):
+            idx, page, err = fut.result()
+            results[idx] = (idx, page, err)
+
+    for _idx, page, err in results:
+        if err and not feats:
+            warning = err
+            continue
+        if err:
+            warning = err
+            truncated = True
+            continue
+        if page is None:
+            continue
+        for f in page:
+            sig = _feature_sig(f)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            if layer_key == "natgas_pipelines":
+                f["properties"] = _norm_natgas_props(f.get("properties") or {})
+            feats.append(f)
+            source_breakdown[source_key] += 1
+            if len(feats) >= target:
+                truncated = True
+                break
+        if len(feats) >= target:
+            break
+    return truncated, warning
+
+
 @app.get("/api/siting/proxy/{layer_key}")
 def siting_proxy(
     layer_key: str,
@@ -1760,11 +1877,38 @@ def siting_proxy(
     truncated = False
     upstream_warning: str | None = None
     try:
-        import requests as _rq
+        import requests as _rq  # noqa: F401
         for source_url in source_urls:
             offset = 0
             source_key = source_url.split("/arcgis/")[0]
             source_breakdown.setdefault(source_key, 0)
+
+            # Layers opt in to parallel pagination (parcels, FEMA flood,
+            # USFWS wetlands, transmission). For these we expect 2–8 pages
+            # at typical zooms; firing them concurrently turns 1–2 s of
+            # serial latency into one ~300 ms wall-clock window.
+            if cfg.get("parallel_pages") and len(source_urls) <= 1:
+                par_truncated, par_warn = _fetch_arcgis_pages_parallel(
+                    cfg, source_url, bbox_t,
+                    target=target, page_size=page_size,
+                    extra_where=extra_where,
+                    layer_key=layer_key,
+                    seen=seen, feats=feats,
+                    source_breakdown=source_breakdown,
+                    source_key=source_key,
+                )
+                if par_warn:
+                    upstream_warning = par_warn
+                if par_truncated:
+                    truncated = True
+                if len(feats) >= target:
+                    break
+                # If we got *some* data but the parallel pass warned, fall
+                # through to the serial loop below to top up. Otherwise we
+                # already have everything; skip the serial loop.
+                if not par_warn:
+                    break
+
             while len(feats) < target:
                 url = _arcgis_query_url_for_source(
                     cfg,

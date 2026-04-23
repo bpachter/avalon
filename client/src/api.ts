@@ -177,9 +177,24 @@ export async function fetchSitingProxyGeoJSON(
   bbox: [number, number, number, number],
   limit = 8000,
   state?: string | null,
+  zoom?: number | null,
 ): Promise<{ type: 'FeatureCollection'; features: unknown[]; _meta: Record<string, unknown> } | { error: string }> {
   const params = new URLSearchParams({ bbox: bbox.join(','), limit: String(limit) })
   if (state) params.set('state', state)
+  if (zoom != null && Number.isFinite(zoom)) params.set('zoom', zoom.toFixed(2))
+
+  // ── Client-side LRU cache ──────────────────────────────────────────
+  // The backend already snaps the bbox into a quantised cache key, so
+  // small pans / re-toggles within the same zoom band collapse to one
+  // upstream request. Mirroring that on the client means we don't even
+  // hit the network for those cases — the pan feels instant.
+  const qbbox = _quantizeBboxForCache(bbox, zoom ?? null)
+  const cacheKey = `${layerKey}|${qbbox}|${limit}|${(state ?? '').toUpperCase()}|${_zoomBand(zoom ?? null)}`
+  const cached = _proxyClientCache.get(cacheKey)
+  if (cached && (performance.now() - cached.t) < CLIENT_CACHE_TTL_MS) {
+    return cached.data
+  }
+
   try {
     const r = await fetch(`${BASE}/api/siting/proxy/${layerKey}?${params}`)
     if (!r.ok) {
@@ -187,10 +202,56 @@ export async function fetchSitingProxyGeoJSON(
       try { j = await r.json() } catch { /* ignore */ }
       return { error: j.error ?? `HTTP ${r.status}` }
     }
-    return await parseJsonOrThrow(r, `siting/proxy/${layerKey}`)
+    const data = await parseJsonOrThrow(r, `siting/proxy/${layerKey}`)
+    _proxyClientCachePut(cacheKey, data)
+    return data
   } catch (e) {
     return { error: String(e) }
   }
+}
+
+// ── Proxy LRU helpers (kept local to api.ts so SitingPanel stays UI-only) ──
+const CLIENT_CACHE_TTL_MS = 4 * 60 * 1000   // backend TTL is 5min — undershoot
+const CLIENT_CACHE_MAX = 200
+type _CacheEntry = { t: number; data: { type: 'FeatureCollection'; features: unknown[]; _meta: Record<string, unknown> } | { error: string } }
+const _proxyClientCache: Map<string, _CacheEntry> = new Map()
+
+function _zoomBand(zoom: number | null): number {
+  if (zoom == null) return -1
+  if (zoom < 5)  return 4
+  if (zoom < 7)  return 6
+  if (zoom < 9)  return 8
+  if (zoom < 11) return 10
+  if (zoom < 13) return 12
+  if (zoom < 15) return 14
+  return 16
+}
+
+function _quantizeBboxForCache(b: [number, number, number, number], zoom: number | null): string {
+  const band = _zoomBand(zoom)
+  const step =
+    band === 4  ? 0.5    :
+    band === 6  ? 0.2    :
+    band === 8  ? 0.05   :
+    band === 10 ? 0.02   :
+    band === 12 ? 0.005  :
+    band === 14 ? 0.001  :
+    band === 16 ? 0.0003 :
+                  0.01
+  return b.map(v => (Math.round(v / step) * step).toFixed(5)).join(',')
+}
+
+function _proxyClientCachePut(key: string, data: _CacheEntry['data']) {
+  if (_proxyClientCache.size >= CLIENT_CACHE_MAX) {
+    // Map preserves insertion order; drop the oldest 25%.
+    const drop = Math.floor(CLIENT_CACHE_MAX / 4)
+    let i = 0
+    for (const k of _proxyClientCache.keys()) {
+      _proxyClientCache.delete(k)
+      if (++i >= drop) break
+    }
+  }
+  _proxyClientCache.set(key, { t: performance.now(), data })
 }
 
 export async function fetchSitingStates(): Promise<{ states: StateOption[]; duke_states: string[] }> {

@@ -585,3 +585,105 @@
   text-align: right;
   text-shadow: 0 0 6px currentColor;
 }
+
+/* ============================================================
+   Avalon polish v2 — Paces-parity push (2026-04-22)
+   - in-flight network indicator
+   - smoother layer-row hover & status pulse
+   - subtler legend / panel transitions
+   ============================================================ */
+
+/* Floating "loading" pill in the map area */
+.net-indicator {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 8px;
+  background: rgba(7, 8, 13, 0.82);
+  border: 1px solid var(--cyan-dim);
+  color: var(--cyan);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  border-radius: 2px;
+  box-shadow: 0 0 14px var(--cyan-glow);
+  z-index: 6;
+  pointer-events: none;
+  animation: avln-fadein 140ms ease-out;
+}
+.net-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  animation: avln-pulse 1s ease-in-out infinite;
+}
+@keyframes avln-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+@keyframes avln-fadein {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Layer rows: gentle hover + active glow so the panel feels alive
+   without breaking the ENKIDU terminal vibe. */
+.layer-row {
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+.layer-row:hover {
+  background: rgba(0, 229, 255, 0.04);
+}
+.layer-row.on {
+  background: rgba(255, 149, 0, 0.04);
+}
+
+/* When a layer is loading, the colored dot subtly pulses so the eye
+   can find which row is fetching even with the global pill hidden. */
+.layer-row.is-loading .layer-dot {
+  animation: avln-pulse 1.2s ease-in-out infinite;
+}
+
+/* Polished primary button: clearer affordance + cyan focus ring */
+.primary-btn {
+  transition: all var(--transition);
+}
+.primary-btn:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+  box-shadow: 0 0 12px var(--cyan-glow);
+}
+
+/* Map legend: very subtle backdrop blur for legibility on satellite */
+.map-legend {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: opacity var(--transition);
+}
+
+/* Skeleton row used while ranked sites are scoring */
+.rank-skeleton {
+  height: 44px;
+  margin: 6px 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 149, 0, 0.04) 0%,
+    rgba(255, 149, 0, 0.10) 50%,
+    rgba(255, 149, 0, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: avln-shimmer 1.4s linear infinite;
+  border-left: 2px solid var(--amber-dim);
+}
+@keyframes avln-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+

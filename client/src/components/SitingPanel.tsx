@@ -719,8 +719,8 @@ export default function SitingPanel() {
       // Merge Duke-owned lines into the base transmission overlay so the UI has
       // one toggle and one unified voltage legend.
       const [baseData, dukeData] = await Promise.all([
-        fetchSitingProxyGeoJSON('transmission', bbox, limit, stateFilter),
-        fetchSitingProxyGeoJSON('transmission_duke', bbox, limit, stateFilter),
+        fetchSitingProxyGeoJSON('transmission', bbox, limit, stateFilter, zoom),
+        fetchSitingProxyGeoJSON('transmission_duke', bbox, limit, stateFilter, zoom),
       ])
       const baseOk = !('error' in baseData)
       const dukeOk = !('error' in dukeData)
@@ -733,7 +733,7 @@ export default function SitingPanel() {
       if (dukeOk && Array.isArray((dukeData as any).features)) mergedFeatures.push(...(dukeData as any).features)
       data = { type: 'FeatureCollection', features: mergedFeatures }
     } else {
-      data = await fetchSitingProxyGeoJSON(key, bbox, limit, stateFilter)
+      data = await fetchSitingProxyGeoJSON(key, bbox, limit, stateFilter, zoom)
       if ('error' in data) {
         setLayerStatus(s => ({ ...s, [key]: 'error' }))
         return
@@ -928,10 +928,14 @@ export default function SitingPanel() {
     const prevThreshold = prevZoomThresholdRef.current
     const lastBbox = lastFetchBboxRef.current
     
-    // Check if we've panned significantly (> 20% of current viewport width/height)
+    // Check if we've panned enough that the backend cache key would change.
+    // The backend snaps bbox to a zoom-band-sized grid (≈0.5° at z4 … 1mdeg
+    // at z14+), and the api.ts client cache mirrors that. So a 35% pan still
+    // collapses to a cache hit when we're inside the same band — no need to
+    // be conservative here. (Old value: 20% → too many wasted refetches.)
     const bboxWidth = bbox[2] - bbox[0]
     const bboxHeight = bbox[3] - bbox[1]
-    const panThreshold = Math.max(bboxWidth, bboxHeight) * 0.2
+    const panThreshold = Math.max(bboxWidth, bboxHeight) * 0.35
     
     const significantPan = lastBbox && (
       Math.abs(bbox[0] - lastBbox[0]) > panThreshold ||
@@ -1190,7 +1194,7 @@ export default function SitingPanel() {
                     st === 'error'   ? 'err' :
                     st === 'ok'      ? '●' : ''
                   return (
-                    <li key={l.key} className={`layer-row ${enabledLayers[l.key] ? 'on' : ''}`}>
+                    <li key={l.key} className={`layer-row ${enabledLayers[l.key] ? 'on' : ''} ${layerStatus[l.key] === 'loading' ? 'is-loading' : ''}`}>
                       <label>
                         <input
                           type="checkbox"
@@ -1351,6 +1355,20 @@ export default function SitingPanel() {
             {bbox && `${bbox[1].toFixed(2)}°N ${bbox[0].toFixed(2)}°E → ${bbox[3].toFixed(2)}°N ${bbox[2].toFixed(2)}°E`}
           </span>
         </div>
+        {/* In-flight overlay-fetch indicator. Pulses while any layer is
+            loading so the user sees the system is working — important now
+            that pans collapse to the cache and "instant" can otherwise look
+            like "did anything happen?". */}
+        {(() => {
+          const inflight = Object.values(layerStatus).filter(s => s === 'loading').length
+          if (inflight === 0) return null
+          return (
+            <div className="net-indicator" title={`${inflight} layer${inflight === 1 ? '' : 's'} loading`}>
+              <span className="net-dot" />
+              <span className="net-label">LOADING · {inflight}</span>
+            </div>
+          )
+        })()}
         {activeLegendLayers.length > 0 && (
           <div className="map-legend">
             <div className="map-legend-head">ACTIVE LAYERS</div>

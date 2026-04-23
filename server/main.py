@@ -311,7 +311,9 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "name": "Cellular towers", "group": "Grid & infrastructure",
         "url": f"{_HIFLD2}/Cellular_Towers_in_the_United_States/FeatureServer/0",
         "where": "1=1", "out_fields": "*",
-        "geom": "point", "color": "#ffd000", "min_zoom": 9,
+        # min_zoom dropped 9 → 7. Towers are points so simplification
+        # doesn't help, but the cache + state-clipping make z7 cheap enough.
+        "geom": "point", "color": "#ffd000", "min_zoom": 7,
         "source": "HIFLD", "max_records": 4000,
     },
     "substations": {
@@ -369,7 +371,11 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "url": "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
         "where": "1=1",
         "out_fields": "OBJECTID,FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE",
-        "geom": "polygon", "color": "#7ad0ff", "min_zoom": 8,
+        # min_zoom dropped 8 → 6 in the Paces-parity push. Backend now applies
+        # zoom-aware Douglas–Peucker so the polygon payload at z6 is small
+        # enough to render without choking the browser, even though the bbox
+        # covers a much larger area.
+        "geom": "polygon", "color": "#7ad0ff", "min_zoom": 6,
         # FEMA's NFHL gateway 504s when asked for >1000 polygons in a single
         # request. Keep page_size small and rely on pagination to assemble the
         # viewport's polygons.
@@ -386,7 +392,9 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         # MapServer joins two tables; use "*" so we don't have to hardcode
         # table-prefixed field names like Wetlands.OBJECTID. Keeps query valid.
         "out_fields": "*",
-        "geom": "polygon", "color": "#3ad6a0", "min_zoom": 9,
+        # min_zoom dropped 9 → 7: simplified wetlands at z7 give an immediate
+        # "where the green is" read for site-screening at the regional view.
+        "geom": "polygon", "color": "#3ad6a0", "min_zoom": 7,
         "source": "USFWS NWI", "max_records": 50000, "page_size": 1000,
     },
     "county_subdivisions": {
@@ -1516,12 +1524,152 @@ def siting_live_layers():
     ]}
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Proxy response cache + zoom-aware geometry simplification.
+#
+# The /api/siting/proxy/{layer_key} endpoint is the single hottest path
+# in the app. Repeated panning, basemap toggles and (most importantly)
+# overlapping viewports across users were re-querying ArcGIS upstreams
+# every time. We add:
+#
+#   1. A small in-process TTL cache keyed by (layer, qbbox, qlimit,
+#      state, zoom_band). Bbox is quantised so a few px of pan still
+#      hits the cache.
+#   2. Zoom-aware Douglas–Peucker simplification for line/polygon
+#      layers. At low zoom the rendered features are sub-pixel anyway,
+#      so we drop verts → 60–90 % smaller payloads → far more layers
+#      can render at z4–z8 without choking the browser.
+# ─────────────────────────────────────────────────────────────────────
+_PROXY_CACHE: dict[str, tuple[float, dict]] = {}
+_PROXY_CACHE_TTL_SEC = 5 * 60     # match Cache-Control max-age
+_PROXY_CACHE_MAX = 256            # simple LRU-by-eviction bound
+
+
+def _zoom_band(zoom: float | None) -> int:
+    """Bucket continuous zoom into a small number of bands for caching.
+
+    Adjacent zooms share simplification tolerance + record limits, so they
+    can safely share a cached payload.
+    """
+    if zoom is None:
+        return -1
+    if zoom < 5:   return 4
+    if zoom < 7:   return 6
+    if zoom < 9:   return 8
+    if zoom < 11:  return 10
+    if zoom < 13:  return 12
+    if zoom < 15:  return 14
+    return 16
+
+
+def _simplify_tolerance_for_zoom(zoom: float | None) -> float | None:
+    """Douglas–Peucker tolerance in degrees, scaled to zoom level.
+
+    At z4 (~country view) ~0.02° (~2 km) is invisible; at z14 we leave
+    geometry untouched. Returning None disables simplification.
+    """
+    if zoom is None or zoom >= 13:
+        return None
+    if zoom < 5:   return 0.02
+    if zoom < 7:   return 0.005
+    if zoom < 9:   return 0.0015
+    if zoom < 11:  return 0.0005
+    return 0.00015
+
+
+def _quantize_bbox(bbox_t: tuple[float, float, float, float], zoom: float | None) -> str:
+    """Snap bbox to a grid so small pans share a cache key.
+
+    Step size shrinks as zoom increases so we don't over-coalesce at z14+.
+    """
+    band = _zoom_band(zoom)
+    # tolerance in degrees: roughly half a pixel-row at the zoom band
+    step = {
+        4: 0.5, 6: 0.2, 8: 0.05, 10: 0.02, 12: 0.005, 14: 0.001, 16: 0.0003,
+        -1: 0.01,
+    }.get(band, 0.01)
+    return ",".join(f"{round(v / step) * step:.5f}" for v in bbox_t)
+
+
+def _proxy_cache_key(
+    layer_key: str,
+    bbox_t: tuple[float, float, float, float],
+    limit: int,
+    state: str | None,
+    zoom: float | None,
+) -> str:
+    return "|".join([
+        layer_key,
+        _quantize_bbox(bbox_t, zoom),
+        str(limit),
+        (state or "").upper(),
+        str(_zoom_band(zoom)),
+    ])
+
+
+def _proxy_cache_get(key: str) -> dict | None:
+    item = _PROXY_CACHE.get(key)
+    if not item:
+        return None
+    ts, payload = item
+    if (time.time() - ts) > _PROXY_CACHE_TTL_SEC:
+        _PROXY_CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _proxy_cache_put(key: str, payload: dict) -> None:
+    if len(_PROXY_CACHE) >= _PROXY_CACHE_MAX:
+        # cheap eviction: drop oldest 25 %
+        oldest = sorted(_PROXY_CACHE.items(), key=lambda kv: kv[1][0])[: _PROXY_CACHE_MAX // 4]
+        for k, _ in oldest:
+            _PROXY_CACHE.pop(k, None)
+    _PROXY_CACHE[key] = (time.time(), payload)
+
+
+def _simplify_features(features: list[dict], geom_type: str, zoom: float | None) -> tuple[list[dict], int]:
+    """Apply Douglas–Peucker to line/polygon features for low-zoom payloads.
+
+    Point layers are returned unchanged. Returns (features, vertices_dropped).
+    """
+    if geom_type not in {"line", "polygon"}:
+        return features, 0
+    tol = _simplify_tolerance_for_zoom(zoom)
+    if tol is None:
+        return features, 0
+    try:
+        from shapely.geometry import shape as _shape, mapping as _mapping
+    except Exception:
+        return features, 0
+    out: list[dict] = []
+    dropped = 0
+    for f in features:
+        geom = f.get("geometry") if isinstance(f, dict) else None
+        if not geom:
+            continue
+        try:
+            g = _shape(geom)
+            v_before = len(getattr(g, "coords", [])) if hasattr(g, "coords") else 0
+            g2 = g.simplify(tol, preserve_topology=False)
+            if g2.is_empty:
+                continue
+            v_after = len(getattr(g2, "coords", [])) if hasattr(g2, "coords") else 0
+            dropped += max(0, v_before - v_after)
+            nf = dict(f)
+            nf["geometry"] = _mapping(g2)
+            out.append(nf)
+        except Exception:
+            out.append(f)
+    return out, dropped
+
+
 @app.get("/api/siting/proxy/{layer_key}")
 def siting_proxy(
     layer_key: str,
     bbox: str | None = None,
     limit: int = 8000,
     state: str | None = None,
+    zoom: float | None = None,
     as_dict: bool = False,
 ):
     cfg = LIVE_LAYER_REGISTRY.get(layer_key)
@@ -1537,6 +1685,20 @@ def siting_proxy(
     except Exception as e:
         payload = {"error": f"bad bbox: {e}"}
         return payload if as_dict else JSONResponse(status_code=400, content=payload)
+
+    # ── In-process response cache ───────────────────────────────────
+    # Repeat panning, basemap toggles and overlapping viewports across
+    # users all collapse to the same cache key so the upstream ArcGIS
+    # is hit at most once per (layer, qbbox, zoom_band, state) per TTL.
+    cache_key = _proxy_cache_key(layer_key, bbox_t, limit, state, zoom)
+    cached = _proxy_cache_get(cache_key)
+    if cached is not None:
+        if as_dict:
+            return cached
+        response = JSONResponse(cached)
+        response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=600"
+        response.headers["X-Avalon-Cache"] = "hit"
+        return response
 
     # Internal layers — fiber + opposition — are served by in-process
     # handlers instead of an ArcGIS upstream.
@@ -1689,9 +1851,16 @@ def siting_proxy(
     if state and layer_key in {"transmission", "transmission_duke", "natgas_pipelines"}:
         feats, state_polygon_clipped = _clip_features_to_state_polygon(feats, state)
 
+    # Zoom-aware Douglas–Peucker on line/polygon payloads. Sub-pixel verts
+    # at low zoom are wasted bytes; dropping them lets us return many more
+    # *features* under the same wire budget — the whole point of the
+    # "show more data sooner" goal vs. Paces.
+    geom_kind = str(cfg.get("geom") or "")
+    feats, simplify_dropped = _simplify_features(feats[:target], geom_kind, zoom)
+
     payload = {
         "type": "FeatureCollection",
-        "features": feats[:target],
+        "features": feats,
         "_meta": {
             "layer": layer_key, "name": cfg["name"], "source": cfg["source"],
             "group": cfg["group"], "geom": cfg["geom"], "color": cfg["color"],
@@ -1702,8 +1871,14 @@ def siting_proxy(
             "state_polygon_clipped": state_polygon_clipped,
             "source_count": len(source_urls), "source_breakdown": source_breakdown,
             "warning": upstream_warning,
+            "zoom": zoom, "zoom_band": _zoom_band(zoom),
+            "simplify_dropped_verts": simplify_dropped,
         },
     }
+    # Only cache successful, non-warning responses so transient upstream
+    # outages don't stick around for 5 minutes.
+    if not upstream_warning and feats:
+        _proxy_cache_put(cache_key, payload)
     if as_dict:
         return payload
     response = JSONResponse(payload)
@@ -1712,6 +1887,7 @@ def siting_proxy(
     # the upstream. 5-minute private TTL is short enough that infrastructure
     # updates appear quickly while panning the same area is essentially free.
     response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=600"
+    response.headers["X-Avalon-Cache"] = "miss"
     return response
 
 

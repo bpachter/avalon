@@ -462,8 +462,8 @@
 
 .site-detail {
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  top: 16px;
+  right: 16px;
   z-index: 5;
   width: 380px;
   max-height: 50vh;
@@ -472,6 +472,11 @@
   border: 1px solid var(--border);
   backdrop-filter: blur(6px);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+}
+.site-detail.collapsed {
+  width: 360px;
+  max-height: none;
+  overflow: hidden;
 }
 .detail-head {
   display: flex;
@@ -492,6 +497,10 @@
   font-family: var(--font-display);
   font-size: 30px;
   text-shadow: 0 0 10px currentColor;
+}
+.detail-toggle {
+  color: var(--cyan);
+  letter-spacing: 0.14em;
 }
 .detail-meta {
   padding: 6px 14px;

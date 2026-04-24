@@ -420,6 +420,7 @@ export default function SitingPanel() {
   const [sites, setSites] = useState<SiteResultDTO[]>([])
   const [siteInputs, setSiteInputs] = useState<SiteInput[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedPanelCollapsed, setSelectedPanelCollapsed] = useState(true)
   const [detailSite, setDetailSite] = useState<SiteResultDTO | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [scoring, setScoring] = useState(false)
@@ -571,7 +572,6 @@ export default function SitingPanel() {
         const defaultsOn = new Set([
           'state_boundary',
           'transmission',
-          'substations',
           'natgas_pipelines',
           'fiber_pops',
           'data_centers',
@@ -2018,39 +2018,50 @@ export default function SitingPanel() {
           </div>
         )}
         {selected && (
-          <div className="site-detail">
+          <div className={`site-detail ${selectedPanelCollapsed ? 'collapsed' : ''}`}>
             <div className="detail-head">
               <span className="detail-id">{selected.site_id}</span>
               <span
                 className="detail-score"
                 style={{ color: colorForScore(selected.composite, Object.values(selected.kill_flags).some(Boolean)) }}
               >{selected.composite.toFixed(2)}</span>
+              <button
+                className="link-btn detail-toggle"
+                onClick={() => setSelectedPanelCollapsed((v) => !v)}
+                title={selectedPanelCollapsed ? 'Expand site panel' : 'Collapse site panel'}
+              >
+                {selectedPanelCollapsed ? 'EXPAND' : 'COLLAPSE'}
+              </button>
               <button className="link-btn" onClick={() => setSelectedId(null)}>×</button>
             </div>
-            <div className="detail-meta">
-              {selected.lat.toFixed(4)}°, {selected.lon.toFixed(4)}°
-              {Object.entries(selected.kill_flags).filter(([, v]) => v).map(([k]) => (
-                <span key={k} className="kill-tag">KILL: {k}</span>
-              ))}
-            </div>
-            <table className="detail-tbl">
-              <thead><tr><th>factor</th><th>raw</th><th>norm</th><th>w</th><th>·w</th></tr></thead>
-              <tbody>
-                {Object.entries(selected.factors)
-                  .sort((a, b) => b[1].weighted - a[1].weighted)
-                  .map(([k, f]) => (
-                    <tr key={k} className={f.killed ? 'killed' : ''}>
-                      <td>{k}</td>
-                      <td>{f.raw_value == null ? '—' : Number(f.raw_value).toFixed(2)}</td>
-                      <td>{(f.normalized * 100).toFixed(0)}</td>
-                      <td>{(f.weight * 100).toFixed(0)}</td>
-                      <td>{(f.weighted * 100).toFixed(1)}</td>
-                    </tr>
+            {!selectedPanelCollapsed && (
+              <>
+                <div className="detail-meta">
+                  {selected.lat.toFixed(4)}°, {selected.lon.toFixed(4)}°
+                  {Object.entries(selected.kill_flags).filter(([, v]) => v).map(([k]) => (
+                    <span key={k} className="kill-tag">KILL: {k}</span>
                   ))}
-              </tbody>
-            </table>
-            {selected.imputed.length > 0 && (
-              <div className="imputed-note">imputed (cohort median): {selected.imputed.join(', ')}</div>
+                </div>
+                <table className="detail-tbl">
+                  <thead><tr><th>factor</th><th>raw</th><th>norm</th><th>w</th><th>·w</th></tr></thead>
+                  <tbody>
+                    {Object.entries(selected.factors)
+                      .sort((a, b) => b[1].weighted - a[1].weighted)
+                      .map(([k, f]) => (
+                        <tr key={k} className={f.killed ? 'killed' : ''}>
+                          <td>{k}</td>
+                          <td>{f.raw_value == null ? '—' : Number(f.raw_value).toFixed(2)}</td>
+                          <td>{(f.normalized * 100).toFixed(0)}</td>
+                          <td>{(f.weight * 100).toFixed(0)}</td>
+                          <td>{(f.weighted * 100).toFixed(1)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+                {selected.imputed.length > 0 && (
+                  <div className="imputed-note">imputed (cohort median): {selected.imputed.join(', ')}</div>
+                )}
+              </>
             )}
           </div>
         )}

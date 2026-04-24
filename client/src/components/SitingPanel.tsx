@@ -449,6 +449,11 @@ export default function SitingPanel() {
 
   const [stubCoverage, setStubCoverage] = useState<Record<string, number>>({})
 
+  // Operator-counts/colors captured from the data_centers layer's _meta.
+  // Drives the operator legend and is updated each time the layer reloads.
+  const [dcOperatorCounts, setDcOperatorCounts] = useState<Record<string, number>>({})
+  const [dcOperatorColors, setDcOperatorColors] = useState<Record<string, string>>({})
+  const [dcCacheAgeHours, setDcCacheAgeHours] = useState<number | null>(null)
   // ── Site overlays · KMZ import + drawing + 3D terrain ─────────────────
   const drawCtrlRef = useRef<DrawController | null>(null)
   const importedFCRef = useRef<GeoJSON.FeatureCollection | null>(null)
@@ -563,11 +568,22 @@ export default function SitingPanel() {
       setLayers(r.layers)
       setEnabledLayers(prev => {
         const next: Record<string, boolean> = {}
-        const defaultsOn = new Set(['state_boundary', 'transmission', 'natgas_pipelines'])
+        const defaultsOn = new Set([
+          'state_boundary',
+          'transmission',
+          'substations',
+          'natgas_pipelines',
+          'fiber_pops',
+          'data_centers',
+          // active state's parcel layer is added below by key prefix
+        ])
         for (const l of r.layers) {
           if (l.key === 'transmission_duke') {
             // merged into transmission for a single combined toggle
             next[l.key] = false
+          } else if (l.key === `${activeState.toLowerCase()}_parcels`) {
+            // Active state's parcel layer defaults ON.
+            next[l.key] = prev[l.key] ?? true
           } else {
             next[l.key] = prev[l.key] ?? defaultsOn.has(l.key)
           }
@@ -802,6 +818,14 @@ export default function SitingPanel() {
         return
       }
     }
+    // Capture per-operator counts/colors from the data_centers payload so
+    // the legend reflects what's currently in view.
+    if (key === 'data_centers') {
+      const meta = (data as any)?._meta ?? {}
+      if (meta.operator_counts) setDcOperatorCounts(meta.operator_counts as Record<string, number>)
+      if (meta.operator_colors) setDcOperatorColors(meta.operator_colors as Record<string, string>)
+      if (meta.cache_age_hours != null) setDcCacheAgeHours(Number(meta.cache_age_hours))
+    }
     const SRC = `ovl-${key}-src`
     const LYR = `ovl-${key}-lyr`
     const LYR_FILL = `ovl-${key}-fill`
@@ -835,16 +859,45 @@ export default function SitingPanel() {
           },
         }, beforeId)
       } else if (lyr.geom === 'point') {
+        const isOperator = lyr.style === 'operator' || key === 'data_centers'
         map.addLayer({
           id: LYR, type: 'circle', source: SRC,
           paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 2.5, 10, 5],
-            'circle-color': lyr.color,
-            'circle-stroke-color': '#000',
-            'circle-stroke-width': 0.6,
+            'circle-radius': isOperator
+              ? ['interpolate', ['linear'], ['zoom'], 4, 4, 8, 7, 12, 10]
+              : ['interpolate', ['linear'], ['zoom'], 4, 2.5, 10, 5],
+            'circle-color': isOperator
+              ? ['coalesce', ['get', 'operator_color'], lyr.color]
+              : lyr.color,
+            'circle-stroke-color': isOperator ? '#ffffff' : '#000',
+            'circle-stroke-width': isOperator ? 1.4 : 0.6,
             'circle-opacity': 0.95,
           },
         }, beforeId)
+        if (isOperator) {
+          // Click → details popup (reuses parcel popup chrome with a
+          // data-center-shaped payload). Cursor change + handler tracked so
+          // toggling the layer off cleans up correctly.
+          const onEnter = () => { map.getCanvas().style.cursor = 'pointer' }
+          const onLeave = () => { map.getCanvas().style.cursor = '' }
+          const onClick = (e: any) => {
+            const f = e.features?.[0]
+            if (!f) return
+            setParcelPopup({
+              lat: e.lngLat.lat,
+              lon: e.lngLat.lng,
+              props: { __datacenter__: true, ...(f.properties as Record<string, unknown>) },
+            })
+          }
+          map.on('mouseenter', LYR, onEnter)
+          map.on('mouseleave', LYR, onLeave)
+          map.on('click', LYR, onClick)
+          overlayHandlersRef.current.set(key, [
+            { type: 'mouseenter', layerId: LYR, fn: onEnter },
+            { type: 'mouseleave', layerId: LYR, fn: onLeave },
+            { type: 'click',      layerId: LYR, fn: onClick },
+          ])
+        }
       } else {
         // polygon
         const isOutline = lyr.style === 'outline'
@@ -1708,6 +1761,51 @@ export default function SitingPanel() {
             <div className="map-legend-head">ACTIVE LAYERS</div>
             {activeLegendLayers.map((l) => {
               const voltageStyle = l.key === 'transmission'
+              const isDataCenters = l.key === 'data_centers'
+              if (isDataCenters) {
+                const ops = Object.entries(dcOperatorCounts)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 14)
+                const total = Object.values(dcOperatorCounts).reduce((s, n) => s + n, 0)
+                return (
+                  <div className="map-legend-voltage" key={l.key}>
+                    <div className="map-legend-row">
+                      <span
+                        className="map-legend-swatch"
+                        style={{
+                          background:
+                            'linear-gradient(90deg, #ff9900, #00a4ef, #4285f4, #1877f2, #ed1c24)',
+                        }}
+                      />
+                      <span className="map-legend-name">
+                        Data centers · {total} in view
+                        {dcCacheAgeHours != null && (
+                          <span style={{ color: avalonPalette.whiteDim, marginLeft: 6, fontSize: 9 }}>
+                            (cache {dcCacheAgeHours.toFixed(1)}h old)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="map-legend-voltage-head">OPERATOR</div>
+                    {ops.length === 0 && (
+                      <div style={{ fontSize: 10, color: avalonPalette.whiteDim, padding: '2px 0' }}>
+                        no data centers in current view
+                      </div>
+                    )}
+                    {ops.map(([opName, count]) => (
+                      <div className="map-legend-voltage-row" key={opName}>
+                        <span
+                          className="map-legend-voltage-swatch"
+                          style={{ background: dcOperatorColors[opName] ?? '#a78bfa' }}
+                        />
+                        <span className="map-legend-name">
+                          {opName} <span style={{ color: avalonPalette.whiteDim }}>· {count}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
               return (
                   voltageStyle ? (
                     <div className="map-legend-voltage" key={l.key}>
@@ -1742,12 +1840,75 @@ export default function SitingPanel() {
         {parcelPopup && (
           <div className="parcel-popup">
             <div className="parcel-popup-head">
-              <span>PARCEL</span>
+              <span>{(parcelPopup.props as any).__datacenter__ ? 'DATA CENTER' : 'PARCEL'}</span>
               <button className="link-btn" onClick={() => setParcelPopup(null)}>×</button>
             </div>
             <div className="parcel-popup-body">
               {(() => {
-                const p = parcelPopup.props as Record<string, unknown>
+                const pAny = parcelPopup.props as Record<string, unknown>
+                if ((pAny as any).__datacenter__) {
+                  const dcName = String(pAny.name ?? '')
+                  const dcOp = String(pAny.operator ?? '')
+                  const dcOpRaw = String(pAny.operator_raw ?? '')
+                  const dcCity = String(pAny.city ?? '')
+                  const dcState = String(pAny.state ?? '')
+                  const dcSite = String(pAny.website ?? '')
+                  const dcOsm = String(pAny.osm_id ?? '')
+                  const dcColor = String(pAny.operator_color ?? '#a78bfa')
+                  const curated = !!pAny.curated
+                  return (
+                    <>
+                      <div className="parcel-popup-row">
+                        <span className="parcel-popup-key">operator</span>
+                        <span className="parcel-popup-val">
+                          <span style={{
+                            display: 'inline-block', width: 10, height: 10, borderRadius: 2,
+                            background: dcColor, marginRight: 6, verticalAlign: 'middle',
+                            border: '1px solid #000',
+                          }} />
+                          {dcOp}{curated ? ' · curated' : ''}
+                        </span>
+                      </div>
+                      {dcName && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">site</span>
+                          <span className="parcel-popup-val">{dcName}</span>
+                        </div>
+                      )}
+                      {(dcCity || dcState) && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">location</span>
+                          <span className="parcel-popup-val">{[dcCity, dcState].filter(Boolean).join(', ')}</span>
+                        </div>
+                      )}
+                      {dcOpRaw && dcOpRaw.toLowerCase() !== dcOp.toLowerCase() && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">tagged</span>
+                          <span className="parcel-popup-val">{dcOpRaw}</span>
+                        </div>
+                      )}
+                      {dcSite && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">website</span>
+                          <span className="parcel-popup-val">
+                            <a href={dcSite} target="_blank" rel="noreferrer" style={{ color: avalonPalette.cyan }}>
+                              {dcSite.replace(/^https?:\/\//, '').slice(0, 36)}
+                            </a>
+                          </span>
+                        </div>
+                      )}
+                      <div className="parcel-popup-row">
+                        <span className="parcel-popup-key">source</span>
+                        <span className="parcel-popup-val">{dcOsm.startsWith('curated') ? 'curated' : `OSM ${dcOsm}`}</span>
+                      </div>
+                      <div className="parcel-popup-row">
+                        <span className="parcel-popup-key">coords</span>
+                        <span className="parcel-popup-val">{parcelPopup.lat.toFixed(4)}, {parcelPopup.lon.toFixed(4)}</span>
+                      </div>
+                    </>
+                  )
+                }
+                const p = pAny
                 const pick = (...keys: string[]) => {
                   for (const k of keys) {
                     const v = p[k] ?? p[k.toUpperCase()] ?? p[k.toLowerCase()]

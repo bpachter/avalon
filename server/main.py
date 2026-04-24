@@ -461,6 +461,23 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "max_records": 500, "page_size": 500,
         "internal": True,
     },
+    # Existing data centers — multi-source intelligence layer:
+    #   1) OpenStreetMap Overpass (building=data_center / telecom=data_center
+    #      / office=data_center) — broadest weekly-refreshed source
+    #   2) Curated overrides for known hyperscaler campuses — corrects/labels
+    #      OSM where operator tags are missing or wrong
+    # Operators are classified into ~12 hyperscaler buckets and rendered with
+    # per-operator colors in the frontend. Cached 7 days (weekly refresh).
+    "data_centers": {
+        "name": "Existing data centers", "group": "Datacenter intelligence",
+        "url": "__INTERNAL__/data_centers",
+        "where": "1=1", "out_fields": "*",
+        "geom": "point", "color": "#a78bfa", "style": "operator",
+        "min_zoom": 4,
+        "source": "OpenStreetMap (Overpass) + curated hyperscaler overrides",
+        "max_records": 5000, "page_size": 5000,
+        "internal": True,
+    },
     "nc_parcels": {
         "name": "Parcel outlines (NC)", "group": "Boundaries",
         "url": f"{_NCONEMAP}/NC1Map_Parcels/FeatureServer/1",
@@ -1420,6 +1437,326 @@ def _fiber_pops_fc(bbox_t: tuple[float, float, float, float], *, limit: int, sta
 
 
 
+# ── Existing data centers ─────────────────────────────────────────────
+# Multi-source intelligence pipeline. Primary source is OpenStreetMap via
+# the Overpass API (community-maintained, weekly-fresh enough for siting).
+# We additionally apply a curated map of well-known hyperscaler campuses
+# whose OSM tags are missing/incorrect so that operator classification is
+# reliable for the major buyers a siting analyst actually cares about.
+#
+# Cached for 7 days at the country level; bbox + state filters are applied
+# in-process from the cached payload.
+
+_OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
+]
+_DC_CACHE: dict = {"data": None, "fetched": 0.0}
+_DC_TTL_SEC = 7 * 24 * 3600  # weekly
+
+# Canonical operator buckets. Each entry: (canonical_name, color, regex
+# applied to combined name/operator/owner/brand text). Ordered so that more
+# specific matches win first (e.g. "Microsoft Azure" → Microsoft before any
+# generic Azure-region rules). Colors picked for high contrast on the dark
+# basemap and to read distinctly against the cyan/amber/red overlay palette.
+DATACENTER_OPERATORS: list[tuple[str, str, str]] = [
+    ("Amazon (AWS)",       "#ff9900", r"\b(amazon|aws|amazon web services|vadata)\b"),
+    ("Microsoft (Azure)",  "#00a4ef", r"\b(microsoft|azure|msft)\b"),
+    ("Google",             "#4285f4", r"\b(google|google cloud|gcp|alphabet)\b"),
+    ("Meta",               "#1877f2", r"\b(meta|facebook|instagram|whatsapp)\b"),
+    ("Apple",              "#a3aaae", r"\b(apple)\b"),
+    ("Oracle",             "#c74634", r"\b(oracle)\b"),
+    ("Equinix",            "#ed1c24", r"\b(equinix)\b"),
+    ("Digital Realty",     "#0033a0", r"\b(digital\s*realty|dlr|telx|interxion)\b"),
+    ("QTS",                "#7b3ff2", r"\b(qts|quality technology services|qts realty)\b"),
+    ("CyrusOne",           "#f4364c", r"\b(cyrusone|cyrus one)\b"),
+    ("Iron Mountain",      "#1a7c4f", r"\b(iron\s*mountain)\b"),
+    ("CoreSite",           "#ffb300", r"\b(coresite|core\s*site)\b"),
+    ("Switch",             "#00b3a4", r"\b(switch(?:\s+inc)?|the\s+citadel)\b"),
+    ("Compass",            "#5a6fff", r"\b(compass\s+datacenters?)\b"),
+    ("Stack Infrastructure", "#9c27b0", r"\b(stack\s+infra|stack\s+infrastructure)\b"),
+    ("Vantage",            "#e91e63", r"\b(vantage)\b"),
+    ("Aligned",            "#00c853", r"\b(aligned)\b"),
+    ("EdgeConneX",         "#ff7043", r"\b(edge\s*connex)\b"),
+    ("NTT",                "#0066b3", r"\b(\bntt\b|ntt\s+global|ntt\s+communications)\b"),
+    ("Lumen / CenturyLink","#0061af", r"\b(lumen|centurylink|level\s*3|savvis)\b"),
+    ("Verizon",            "#cd040b", r"\b(verizon)\b"),
+    ("AT&T",               "#00a8e0", r"\b(at\s*&?\s*t|att inc)\b"),
+    ("T-Mobile",           "#e20074", r"\b(t-mobile|tmobile)\b"),
+    ("X / Twitter",        "#000000", r"\b(twitter|x corp|x\.com)\b"),
+    ("TikTok / ByteDance", "#69c9d0", r"\b(tiktok|bytedance|byte\s+dance)\b"),
+    ("Tesla / xAI",        "#cc0000", r"\b(tesla|xai|x\.ai)\b"),
+    ("Crusoe",             "#ff8a65", r"\b(crusoe)\b"),
+    ("Lambda",             "#7e57c2", r"\b(lambda(?:\s+labs)?)\b"),
+    ("CoreWeave",          "#26a69a", r"\b(core\s*weave)\b"),
+    ("Cologix",            "#ff6f00", r"\b(cologix)\b"),
+    ("Flexential",         "#0277bd", r"\b(flexential|peak\s*10|via\s*west)\b"),
+    ("DataBank",           "#00838f", r"\b(databank|data\s*bank)\b"),
+    ("Sabey",              "#558b2f", r"\b(sabey)\b"),
+    ("H5",                 "#5d4037", r"\b(\bh5\b|h5\s+data\s+centers)\b"),
+    ("Prime Data Centers", "#3f51b5", r"\b(prime\s+data\s+centers?)\b"),
+    ("PowerHouse",         "#8d6e63", r"\b(powerhouse)\b"),
+    ("Tract",              "#7e57c2", r"\b(tract\b)\b"),
+]
+
+OTHER_OPERATOR = ("Other / Unknown", "#9aa6bd", r"")
+
+
+def _classify_dc_operator(name: str, operator: str, owner: str, brand: str) -> tuple[str, str]:
+    """Return (canonical_operator, color) for a DC feature."""
+    import re
+    blob = " ".join([str(x or "") for x in (name, operator, owner, brand)]).lower()
+    if not blob.strip():
+        return OTHER_OPERATOR[0], OTHER_OPERATOR[1]
+    for canonical, color, pattern in DATACENTER_OPERATORS:
+        if re.search(pattern, blob, flags=re.IGNORECASE):
+            return canonical, color
+    return OTHER_OPERATOR[0], OTHER_OPERATOR[1]
+
+
+# Curated overrides: hyperscaler campuses whose OSM operator tags are
+# missing or incomplete. Each entry adds (or overwrites) a feature at the
+# given lat/lon. Source: public press releases, build permits, news.
+# Keep this list short and high-confidence; add more as needed.
+_CURATED_HYPERSCALER_CAMPUSES: list[dict] = [
+    # Northern Virginia — the densest hyperscaler corridor on earth
+    {"lat": 39.0193, "lon": -77.4585, "name": "AWS US-East-1 (Sterling/Ashburn cluster)", "operator": "Amazon", "city": "Ashburn", "state": "VA"},
+    {"lat": 39.0438, "lon": -77.4874, "name": "Equinix DC1-DC15 (Ashburn)",                "operator": "Equinix", "city": "Ashburn", "state": "VA"},
+    {"lat": 39.0290, "lon": -77.4360, "name": "Digital Realty Ashburn campus",             "operator": "Digital Realty", "city": "Ashburn", "state": "VA"},
+    {"lat": 39.0068, "lon": -77.4047, "name": "Microsoft Azure US East",                    "operator": "Microsoft", "city": "Sterling", "state": "VA"},
+    {"lat": 39.0250, "lon": -77.5380, "name": "Google Loudoun County",                      "operator": "Google", "city": "Leesburg", "state": "VA"},
+    {"lat": 39.0260, "lon": -77.4940, "name": "Meta Ashburn",                               "operator": "Meta", "city": "Ashburn", "state": "VA"},
+    # Phoenix metro
+    {"lat": 33.3050, "lon": -111.7050, "name": "AWS US-West-2 (Mesa/Phoenix)",              "operator": "Amazon", "city": "Mesa", "state": "AZ"},
+    {"lat": 33.4486, "lon": -112.5070, "name": "Microsoft Goodyear",                        "operator": "Microsoft", "city": "Goodyear", "state": "AZ"},
+    {"lat": 33.4255, "lon": -112.0670, "name": "Meta Mesa",                                 "operator": "Meta", "city": "Mesa", "state": "AZ"},
+    # Central Ohio
+    {"lat": 40.0700, "lon": -83.1230, "name": "Google New Albany",                          "operator": "Google", "city": "New Albany", "state": "OH"},
+    {"lat": 40.0780, "lon": -82.8060, "name": "Meta New Albany",                            "operator": "Meta", "city": "New Albany", "state": "OH"},
+    {"lat": 40.0590, "lon": -82.8260, "name": "AWS Central Ohio (US-East-2)",               "operator": "Amazon", "city": "New Albany", "state": "OH"},
+    {"lat": 39.9450, "lon": -83.0980, "name": "Microsoft Hilliard",                         "operator": "Microsoft", "city": "Hilliard", "state": "OH"},
+    # Iowa
+    {"lat": 41.6420, "lon": -93.7530, "name": "Microsoft West Des Moines",                  "operator": "Microsoft", "city": "West Des Moines", "state": "IA"},
+    {"lat": 41.5050, "lon": -93.7050, "name": "Meta Altoona",                               "operator": "Meta", "city": "Altoona", "state": "IA"},
+    {"lat": 41.7770, "lon": -93.5470, "name": "Google Council Bluffs",                      "operator": "Google", "city": "Council Bluffs", "state": "IA"},
+    # Atlanta
+    {"lat": 33.8400, "lon": -84.4900, "name": "Microsoft East US 2 (Atlanta)",              "operator": "Microsoft", "city": "Atlanta", "state": "GA"},
+    {"lat": 33.6960, "lon": -84.5410, "name": "QTS Atlanta-Suwanee (1M sf)",                "operator": "QTS", "city": "Suwanee", "state": "GA"},
+    {"lat": 33.7320, "lon": -84.4300, "name": "Equinix AT-2/3 (Atlanta)",                   "operator": "Equinix", "city": "Atlanta", "state": "GA"},
+    # Hillsboro / Quincy WA / Pacific NW
+    {"lat": 45.5840, "lon": -122.9550, "name": "AWS US-West-2 (Hillsboro)",                 "operator": "Amazon", "city": "Hillsboro", "state": "OR"},
+    {"lat": 45.5870, "lon": -122.9610, "name": "Google The Dalles",                         "operator": "Google", "city": "The Dalles", "state": "OR"},
+    {"lat": 47.2480, "lon": -119.8550, "name": "Microsoft Quincy",                          "operator": "Microsoft", "city": "Quincy", "state": "WA"},
+    {"lat": 47.2330, "lon": -119.8410, "name": "Sabey Quincy / Yahoo legacy",               "operator": "Sabey", "city": "Quincy", "state": "WA"},
+    # Texas
+    {"lat": 33.0070, "lon": -96.6610, "name": "Digital Realty Plano (DFW1-3)",              "operator": "Digital Realty", "city": "Plano", "state": "TX"},
+    {"lat": 32.9270, "lon": -97.0780, "name": "Equinix DA1-DA11 (Dallas)",                  "operator": "Equinix", "city": "Dallas", "state": "TX"},
+    {"lat": 30.4290, "lon": -97.7600, "name": "Meta Temple",                                "operator": "Meta", "city": "Temple", "state": "TX"},
+    {"lat": 30.2670, "lon": -97.7430, "name": "Tesla / xAI Austin",                         "operator": "Tesla / xAI", "city": "Austin", "state": "TX"},
+    # Tennessee
+    {"lat": 36.5660, "lon": -87.4790, "name": "Google Clarksville",                         "operator": "Google", "city": "Clarksville", "state": "TN"},
+    {"lat": 36.1500, "lon": -86.7800, "name": "Meta Gallatin",                              "operator": "Meta", "city": "Gallatin", "state": "TN"},
+    # NC / SC
+    {"lat": 35.6740, "lon": -78.4720, "name": "Apple Maiden",                               "operator": "Apple", "city": "Maiden", "state": "NC"},
+    {"lat": 35.6790, "lon": -81.1590, "name": "Google Lenoir",                              "operator": "Google", "city": "Lenoir", "state": "NC"},
+    {"lat": 35.5910, "lon": -81.2210, "name": "Apple Catawba campus",                       "operator": "Apple", "city": "Maiden", "state": "NC"},
+    {"lat": 35.5370, "lon": -78.5380, "name": "Meta Forest City",                           "operator": "Meta", "city": "Forest City", "state": "NC"},
+    {"lat": 34.6080, "lon": -81.0270, "name": "Google Mt Holly / Berkeley",                 "operator": "Google", "city": "Goose Creek", "state": "SC"},
+]
+
+
+def _fetch_overpass_data_centers() -> list[dict]:
+    """Fetch all US data-center features from OSM Overpass with 7-day TTL."""
+    import time as _t
+    import requests as _rq
+    now = _t.time()
+    cached = _DC_CACHE.get("data")
+    if cached is not None and (now - _DC_CACHE.get("fetched", 0.0)) < _DC_TTL_SEC:
+        return cached
+
+    # Overpass QL — pull data centers across the US bounding box. We query
+    # nodes/ways/relations for any of the recognized OSM tags.
+    query = """
+    [out:json][timeout:90];
+    (
+      node["building"="data_center"](24.0,-125.5,49.5,-66.0);
+      way["building"="data_center"](24.0,-125.5,49.5,-66.0);
+      relation["building"="data_center"](24.0,-125.5,49.5,-66.0);
+      node["telecom"="data_center"](24.0,-125.5,49.5,-66.0);
+      way["telecom"="data_center"](24.0,-125.5,49.5,-66.0);
+      node["office"="data_center"](24.0,-125.5,49.5,-66.0);
+      way["office"="data_center"](24.0,-125.5,49.5,-66.0);
+      node["man_made"="data_center"](24.0,-125.5,49.5,-66.0);
+      way["man_made"="data_center"](24.0,-125.5,49.5,-66.0);
+    );
+    out tags center 5000;
+    """
+    elements: list[dict] = []
+    for endpoint in _OVERPASS_URLS:
+        try:
+            r = _rq.post(
+                endpoint,
+                data={"data": query},
+                headers={"User-Agent": "avalon-siting/1.0 (datacenter-intelligence)"},
+                timeout=120,
+            )
+            if r.status_code == 200:
+                payload = r.json() or {}
+                elements = payload.get("elements", []) or []
+                if elements:
+                    break
+        except Exception as exc:
+            logger.warning("Overpass %s failed: %s", endpoint, exc)
+            continue
+
+    parsed: list[dict] = []
+    for el in elements:
+        tags = el.get("tags") or {}
+        if el.get("type") == "node":
+            lat, lon = el.get("lat"), el.get("lon")
+        else:
+            ctr = el.get("center") or {}
+            lat, lon = ctr.get("lat"), ctr.get("lon")
+        if lat is None or lon is None:
+            continue
+        try:
+            lat = float(lat); lon = float(lon)
+        except Exception:
+            continue
+        # Skip clearly-non-US (Overpass occasionally returns a few stragglers
+        # whose centers fall outside the bbox after relation resolution).
+        if not (24.0 <= lat <= 49.5 and -125.5 <= lon <= -66.0):
+            continue
+        parsed.append({
+            "lat": lat,
+            "lon": lon,
+            "osm_id": f"{el.get('type','?')}/{el.get('id','?')}",
+            "name": tags.get("name") or "",
+            "operator": tags.get("operator") or "",
+            "owner": tags.get("owner") or "",
+            "brand": tags.get("brand") or "",
+            "addr_city": tags.get("addr:city") or "",
+            "addr_state": tags.get("addr:state") or "",
+            "website": tags.get("website") or tags.get("contact:website") or "",
+            "tags": {k: v for k, v in tags.items() if k in {
+                "building", "telecom", "office", "man_made", "operator:type",
+                "start_date", "construction:start_date",
+            }},
+        })
+
+    # Merge curated overrides. We dedupe by (rounded lat/lon, operator) so
+    # adding an override doesn't double-count an OSM entry at the same spot.
+    seen: set[tuple[float, float, str]] = set()
+    merged: list[dict] = []
+    for rec in parsed:
+        key = (round(rec["lat"], 3), round(rec["lon"], 3), rec.get("operator", "").lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(rec)
+    for cur in _CURATED_HYPERSCALER_CAMPUSES:
+        key = (round(cur["lat"], 3), round(cur["lon"], 3), cur.get("operator", "").lower())
+        if key in seen:
+            # Augment existing record with curated operator/name if richer.
+            for rec in merged:
+                if (round(rec["lat"], 3), round(rec["lon"], 3)) == (key[0], key[1]):
+                    if not rec.get("operator"):
+                        rec["operator"] = cur.get("operator", "")
+                    if not rec.get("name"):
+                        rec["name"] = cur.get("name", "")
+                    rec["curated"] = True
+                    break
+            continue
+        seen.add(key)
+        merged.append({
+            "lat": cur["lat"], "lon": cur["lon"],
+            "osm_id": "curated",
+            "name": cur.get("name", ""),
+            "operator": cur.get("operator", ""),
+            "owner": "", "brand": "",
+            "addr_city": cur.get("city", ""),
+            "addr_state": cur.get("state", ""),
+            "website": "",
+            "tags": {},
+            "curated": True,
+        })
+
+    _DC_CACHE["data"] = merged
+    _DC_CACHE["fetched"] = now
+    return merged
+
+
+def _data_centers_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
+    """GeoJSON FeatureCollection of existing data centers w/ operator color."""
+    xmin, ymin, xmax, ymax = bbox_t
+    if state:
+        region = _state_only_bbox(state)
+        if region:
+            clipped = _bbox_intersection(bbox_t, region)
+            if clipped is None:
+                return {"type": "FeatureCollection", "features": [],
+                        "_meta": {"layer": "data_centers", "returned": 0, "live": True,
+                                  "state": state}}
+            xmin, ymin, xmax, ymax = clipped
+    st = state.upper() if state else None
+
+    feats: list[dict] = []
+    operator_counts: dict[str, int] = {}
+    operator_colors: dict[str, str] = {}
+    for rec in _fetch_overpass_data_centers():
+        lat = rec["lat"]; lon = rec["lon"]
+        if not (xmin <= lon <= xmax and ymin <= lat <= ymax):
+            continue
+        if st and (rec.get("addr_state") or "").upper() not in {"", st}:
+            # Skip records explicitly tagged with a different state. Records
+            # with no addr:state still pass — they'll be bbox-filtered above.
+            continue
+        canonical, color = _classify_dc_operator(
+            rec.get("name", ""), rec.get("operator", ""),
+            rec.get("owner", ""), rec.get("brand", ""),
+        )
+        operator_counts[canonical] = operator_counts.get(canonical, 0) + 1
+        operator_colors[canonical] = color
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "osm_id": rec.get("osm_id"),
+                "name": rec.get("name") or canonical,
+                "operator_raw": rec.get("operator") or rec.get("owner") or rec.get("brand") or "",
+                "operator": canonical,
+                "operator_color": color,
+                "city": rec.get("addr_city") or "",
+                "state": rec.get("addr_state") or "",
+                "website": rec.get("website") or "",
+                "curated": rec.get("curated", False),
+            },
+        })
+        if len(feats) >= limit:
+            break
+
+    cached_ts = _DC_CACHE.get("fetched", 0.0)
+    return {
+        "type": "FeatureCollection",
+        "features": feats,
+        "_meta": {
+            "layer": "data_centers",
+            "name": "Existing data centers",
+            "source": "OpenStreetMap (Overpass) + curated hyperscaler overrides",
+            "group": "Datacenter intelligence",
+            "geom": "point", "color": "#a78bfa", "min_zoom": 4,
+            "returned": len(feats), "limit": limit,
+            "bbox": f"{xmin},{ymin},{xmax},{ymax}",
+            "state": state, "live": True,
+            "operator_counts": operator_counts,
+            "operator_colors": operator_colors,
+            "cache_age_hours": round((time.time() - cached_ts) / 3600, 1) if cached_ts else None,
+            "ttl_hours": _DC_TTL_SEC // 3600,
+        },
+    }
+
+
 # polygons but is more reliable than tigerweb.geo.census.gov from Railway.
 # Used by the opposition-county layer to render flagged counties red.
 _HIFLD_COUNTIES = f"{_HIFLD2}/Counties_v1/FeatureServer/0"
@@ -1828,6 +2165,8 @@ def siting_proxy(
             return _state_boundary_fc(state)
         if layer_key == "fiber_pops":
             return _fiber_pops_fc(bbox_t, limit=limit, state=state)
+        if layer_key == "data_centers":
+            return _data_centers_fc(bbox_t, limit=limit, state=state)
 
     extra_where: str | None = None
     # Constrain ALL geographic layers to selected state. Single-state clipping

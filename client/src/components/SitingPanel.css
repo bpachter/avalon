@@ -437,6 +437,10 @@
   padding: 10px 12px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
 }
+.parcel-popup.with-site-panel {
+  /* Shift left while the selected-site panel is visible in the top-right. */
+  right: min(408px, calc(100% - 336px));
+}
 .parcel-popup-head {
   display: flex; justify-content: space-between; align-items: center;
   border-bottom: 1px solid var(--cyan-dim);

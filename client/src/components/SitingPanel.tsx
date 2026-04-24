@@ -601,8 +601,12 @@ export default function SitingPanel() {
   }, [loadCatalog])
 
   useEffect(() => {
+    // Intentionally keyed to state only. Including loadStateCandidates in deps
+    // causes a fetch loop because its identity changes when stubCoverage updates
+    // after each scoring response.
     loadStateCandidates(activeState, archetype, weightOverrides)
-  }, [activeState, loadStateCandidates])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeState])
 
   // ── init MapLibre ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -1097,6 +1101,12 @@ export default function SitingPanel() {
           changed = true
         }
       }
+      // Keep the active state's parcel layer ON by default as users switch
+      // states so parcel context is immediately visible.
+      if (activeParcelKey in next && !next[activeParcelKey]) {
+        next[activeParcelKey] = true
+        changed = true
+      }
       enabledRef.current = next
       return changed ? next : prev
     })
@@ -1105,7 +1115,7 @@ export default function SitingPanel() {
       overlayGenRef.current.set(k, (overlayGenRef.current.get(k) ?? 0) + 1)
     }
     setTimeout(() => {
-      for (const [key, on] of Object.entries(enabledLayers)) {
+      for (const [key, on] of Object.entries(enabledRef.current)) {
         if (on && !(key.endsWith('_parcels') && key !== activeParcelKey)) {
           reloadOverlay(key)
         }
@@ -1838,7 +1848,7 @@ export default function SitingPanel() {
           </div>
         )}
         {parcelPopup && (
-          <div className="parcel-popup">
+          <div className={`parcel-popup ${selected ? 'with-site-panel' : ''}`}>
             <div className="parcel-popup-head">
               <span>{(parcelPopup.props as any).__datacenter__ ? 'DATA CENTER' : 'PARCEL'}</span>
               <button className="link-btn" onClick={() => setParcelPopup(null)}>×</button>

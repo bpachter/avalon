@@ -513,6 +513,7 @@ export default function SitingPanel() {
     attrs?: ParcelAttrs
     loading?: boolean
   } | null>(null)
+  const [legendExpandedMobile, setLegendExpandedMobile] = useState(false)
 
   const [stubCoverage, setStubCoverage] = useState<Record<string, number>>({})
 
@@ -1666,6 +1667,10 @@ export default function SitingPanel() {
     [visibleLayers, enabledLayers],
   )
 
+  useEffect(() => {
+    if (activeLegendLayers.length === 0) setLegendExpandedMobile(false)
+  }, [activeLegendLayers.length])
+
   function setWeight(factor: string, val: number) {
     setWeightOverrides(w => ({ ...w, [factor]: val }))
   }
@@ -2090,9 +2095,21 @@ export default function SitingPanel() {
           )
         })()}
         {activeLegendLayers.length > 0 && (
-          <div className="map-legend">
-            <div className="map-legend-head">ACTIVE LAYERS</div>
-            {activeLegendLayers.map((l) => {
+          <div className={`map-legend ${legendExpandedMobile ? 'mobile-expanded' : 'mobile-collapsed'}`}>
+            <div className="map-legend-head-row">
+              <div className="map-legend-head">ACTIVE LAYERS</div>
+              <button
+                type="button"
+                className="map-legend-toggle"
+                onClick={() => setLegendExpandedMobile((v) => !v)}
+                aria-expanded={legendExpandedMobile}
+                aria-label={legendExpandedMobile ? 'Collapse active layers' : 'Expand active layers'}
+              >
+                {legendExpandedMobile ? 'HIDE' : 'SHOW'}
+              </button>
+            </div>
+            <div className="map-legend-body">
+              {activeLegendLayers.map((l) => {
               const voltageStyle = l.key === 'transmission'
               const isDataCenters = l.key === 'data_centers'
               if (isDataCenters) {
@@ -2168,6 +2185,7 @@ export default function SitingPanel() {
                 )
               )
             })}
+            </div>
           </div>
         )}
         {parcelPopup && (

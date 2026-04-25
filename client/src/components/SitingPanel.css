@@ -371,11 +371,32 @@
   padding: 8px 10px;
   backdrop-filter: blur(4px);
 }
+.map-legend-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .map-legend-head {
   color: var(--amber);
   font-size: 9px;
   letter-spacing: 0.18em;
   margin-bottom: 8px;
+}
+.map-legend-toggle {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--cyan-dim);
+  color: var(--cyan);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.map-legend-body {
+  display: block;
 }
 .map-legend-row {
   display: flex;
@@ -1092,9 +1113,42 @@
     right: 8px;
     max-width: none;
     min-width: 0;
-    max-height: 34vh;
-    overflow-y: auto;
+    max-height: 22vh;
+    overflow: hidden;
     padding: 8px;
+  }
+
+  .map-legend-head {
+    margin-bottom: 0;
+  }
+
+  .map-legend-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+  }
+
+  .map-legend.mobile-collapsed {
+    max-height: 44px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+
+  .map-legend.mobile-collapsed .map-legend-body {
+    display: none;
+  }
+
+  .map-legend.mobile-expanded {
+    max-height: 28vh;
+  }
+
+  .map-legend.mobile-expanded .map-legend-body {
+    display: block;
+    margin-top: 8px;
+    max-height: calc(28vh - 42px);
+    overflow-y: auto;
+    padding-right: 2px;
   }
 
   .site-detail,
@@ -1187,7 +1241,15 @@
   }
 
   .map-legend {
-    max-height: 30vh;
+    max-height: 20vh;
+  }
+
+  .map-legend.mobile-expanded {
+    max-height: 24vh;
+  }
+
+  .map-legend.mobile-expanded .map-legend-body {
+    max-height: calc(24vh - 42px);
   }
 
   .site-detail,

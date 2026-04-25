@@ -3,7 +3,7 @@
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: 320px 1fr 280px;
+  grid-template-columns: 320px 1fr 300px;
   background: var(--bg);
   color: var(--white-dim);
   font-family: 'IBM Plex Mono', 'Share Tech Mono', monospace;
@@ -426,7 +426,7 @@
 .parcel-popup {
   position: absolute;
   top: 16px;
-  right: 16px;
+  right: 56px;
   z-index: 6;
   width: 320px;
   background: rgba(8, 11, 16, 0.94);
@@ -439,7 +439,11 @@
 }
 .parcel-popup.with-site-panel {
   /* Shift left while the selected-site panel is visible in the top-right. */
-  right: min(408px, calc(100% - 336px));
+  right: min(456px, calc(100% - 356px));
+}
+.parcel-popup.with-detail-open {
+  /* Drawer is open on the right; keep parcel info fully visible to its left. */
+  right: min(492px, calc(100% - 356px));
 }
 .parcel-popup-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -467,7 +471,7 @@
 .site-detail {
   position: absolute;
   top: 16px;
-  right: 16px;
+  right: 56px;
   z-index: 5;
   width: 380px;
   max-height: 50vh;
@@ -481,6 +485,11 @@
   width: 360px;
   max-height: none;
   overflow: hidden;
+}
+.site-detail.with-modal {
+  /* Keep full panel visible while right-side SITE DETAILS drawer is open. */
+  right: 456px;
+  max-height: calc(100vh - 32px);
 }
 .detail-head {
   display: flex;
@@ -609,13 +618,14 @@
 /* Floating "loading" pill in the map area */
 .net-indicator {
   position: absolute;
-  top: 12px;
-  right: 16px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px 6px 8px;
-  background: rgba(7, 8, 13, 0.82);
+  background: rgba(7, 8, 13, 0.62);
   border: 1px solid var(--cyan-dim);
   color: var(--cyan);
   font-family: var(--font-display);
@@ -625,7 +635,7 @@
   box-shadow: 0 0 14px var(--cyan-glow);
   z-index: 6;
   pointer-events: none;
-  animation: avln-fadein 140ms ease-out;
+  animation: avln-fadein-center 140ms ease-out;
 }
 .net-dot {
   width: 8px; height: 8px;
@@ -641,6 +651,10 @@
 @keyframes avln-fadein {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes avln-fadein-center {
+  from { opacity: 0; transform: translate(-50%, calc(-50% - 4px)); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
 }
 
 /* Layer rows: gentle hover + active glow so the panel feels alive

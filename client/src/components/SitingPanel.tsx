@@ -1192,6 +1192,30 @@ export default function SitingPanel() {
     setSelectedId(s.site_id)
   }
 
+  // Auto 3D policy: ON at z >= 13, OFF below. This keeps terrain/buildings
+  // in sync with zoom without requiring manual toggles.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    const shouldBeOn = zoom >= 13
+    if (shouldBeOn === terrainOn) return
+    if (shouldBeOn) {
+      enableTerrain(map, 1.4)
+      enable3DBuildings(map)
+      setTerrainOn(true)
+    } else {
+      disable3DBuildings(map)
+      disableTerrain(map)
+      setTerrainOn(false)
+    }
+  }, [zoom, mapReady, terrainOn])
+
+  // Deep-dive drawer open: force the map's site panel to expanded mode so
+  // users can compare both detail surfaces side-by-side.
+  useEffect(() => {
+    if (detailOpen) setSelectedPanelCollapsed(false)
+  }, [detailOpen])
+
   // ── Site-overlay handlers ─────────────────────────────────────────────
   async function handleOverlayFile(file: File) {
     setOverlayErr(null)
@@ -1848,7 +1872,7 @@ export default function SitingPanel() {
           </div>
         )}
         {parcelPopup && (
-          <div className={`parcel-popup ${selected ? 'with-site-panel' : ''}`}>
+          <div className={`parcel-popup ${selected ? 'with-site-panel' : ''} ${detailOpen ? 'with-detail-open' : ''}`}>
             <div className="parcel-popup-head">
               <span>{(parcelPopup.props as any).__datacenter__ ? 'DATA CENTER' : 'PARCEL'}</span>
               <button className="link-btn" onClick={() => setParcelPopup(null)}>×</button>
@@ -2028,7 +2052,7 @@ export default function SitingPanel() {
           </div>
         )}
         {selected && (
-          <div className={`site-detail ${selectedPanelCollapsed ? 'collapsed' : ''}`}>
+          <div className={`site-detail ${selectedPanelCollapsed ? 'collapsed' : ''} ${detailOpen ? 'with-modal' : ''}`}>
             <div className="detail-head">
               <span className="detail-id">{selected.site_id}</span>
               <span
@@ -2181,6 +2205,7 @@ export default function SitingPanel() {
                 className={`rank-row ${selectedId === s.site_id ? 'sel' : ''} ${killed ? 'killed' : ''}`}
                 onClick={() => {
                   flyTo(s)
+                  setSelectedPanelCollapsed(false)
                   setDetailSite(s)
                   setDetailOpen(true)
                 }}

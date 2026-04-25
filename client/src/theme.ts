@@ -8,11 +8,11 @@ import { createTheme, alpha } from '@mui/material/styles'
 //   - Keep the VT323 / Share Tech Mono mix the rest of the app uses.
 
 const palette = {
-  bg:        '#07080d',
-  bgPanel:   '#0b0d14',
-  bgInput:   '#0f1119',
-  border:    '#1a2035',
-  borderSoft:'#202946',
+  bg:        '#0b0b0d',
+  bgPanel:   '#121216',
+  bgInput:   '#18181d',
+  border:    '#2a2a31',
+  borderSoft:'#34343d',
   amber:     '#ff9500',
   amberDim:  '#b36900',
   cyan:      '#00e5ff',
@@ -20,7 +20,7 @@ const palette = {
   green:     '#39d353',
   red:       '#ff1a40',
   indigo:    '#5f72ff',
-  paperLift: '#121a2d',
+  paperLift: '#1a1a21',
   whiteDim:  '#8899aa',
 }
 

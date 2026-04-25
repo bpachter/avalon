@@ -12,7 +12,7 @@ export default function App() {
           inset: 0,
           bgcolor: avalonPalette.bg,
           background:
-            'radial-gradient(circle at 8% 12%, rgba(0,229,255,0.10) 0%, rgba(0,229,255,0) 32%), radial-gradient(circle at 88% 0%, rgba(255,149,0,0.16) 0%, rgba(255,149,0,0) 36%), linear-gradient(180deg, #05070d 0%, #080b14 100%)',
+            'radial-gradient(circle at 8% 12%, rgba(0,229,255,0.06) 0%, rgba(0,229,255,0) 30%), radial-gradient(circle at 88% 0%, rgba(255,149,0,0.10) 0%, rgba(255,149,0,0) 34%), linear-gradient(180deg, #09090b 0%, #101014 100%)',
         }}
       >
         <AppBar

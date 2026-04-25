@@ -1536,10 +1536,6 @@ export default function SitingPanel() {
     <div className="siting-root">
       {/* ── Sidebar ── */}
       <aside className="siting-side">
-        <div className="siting-side-head">
-          <span className="siting-title">SITING.MAP</span>
-        </div>
-
         <section className="siting-block">
           <div className="siting-block-head">ARCHETYPE</div>
           <ToggleButtonGroup

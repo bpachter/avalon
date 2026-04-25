@@ -116,7 +116,7 @@ function AiPanel({ site }: { site: SiteResultDTO }) {
       <Box sx={{ textAlign: 'center', py: 6 }}>
         <CircularProgress size={32} sx={{ color: avalonPalette.cyan, mb: 2 }} />
         <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, color: avalonPalette.whiteDim }}>
-          Analyzing {Object.keys(site.factors ?? {}).length} factors with Gandalf...
+          Analyzing {Object.keys(site.factors ?? {}).length} factors with Mithrandir...
         </Typography>
       </Box>
     )
@@ -126,7 +126,7 @@ function AiPanel({ site }: { site: SiteResultDTO }) {
     return (
       <Box sx={{ textAlign: 'center', py: 4 }}>
         <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, color: avalonPalette.whiteDim, mb: 2, letterSpacing: '0.06em', lineHeight: 1.7 }}>
-          Gandalf (Gemma4 26B on local GPU) will analyze each scoring factor
+          Mithrandir (Gemma4 26B on local GPU) will analyze each scoring factor
           and generate a site assessment narrative. Requires OLLAMA_URL on the server.
         </Typography>
         {error && <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 10, color: avalonPalette.red, mb: 2 }}>{error}</Typography>}

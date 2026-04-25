@@ -1,10 +1,10 @@
-"""AI-powered site analysis narratives via Gandalf (Ollama / local Gemma4 26B).
+"""AI-powered site analysis narratives via Mithrandir (Ollama / local Gemma4 26B).
 
-Requires OLLAMA_URL pointing at the Gandalf gateway (Railway) or a local Ollama
+Requires OLLAMA_URL pointing at the Mithrandir gateway (Railway) or a local Ollama
 instance (default: http://localhost:11434).  Set OLLAMA_MODEL to override the
 model (default: gemma4:26b).
 
-On Railway: set OLLAMA_URL=https://your-gandalf-gateway.up.railway.app so
+On Railway: set OLLAMA_URL=https://your-mithrandir-gateway.up.railway.app so
 requests are forwarded through the Cloudflare tunnel to your home RTX 4090.
 """
 from __future__ import annotations
@@ -250,10 +250,10 @@ async def generate_site_analysis(
     factors: dict[str, dict[str, Any]],
     model: str | None = None,
 ) -> dict[str, str]:
-    """Generate AI narratives for all factors + an overall summary via Gandalf.
+    """Generate AI narratives for all factors + an overall summary via Mithrandir.
 
     Returns a dict with keys being factor names (+ "overall_summary").
-    On failure (Gandalf offline, tunnel down), returns error placeholder strings.
+    On failure (Mithrandir offline, tunnel down), returns error placeholder strings.
     """
     return await _generate_ollama(
         site_id=site_id, lat=lat, lon=lon, state=state,
@@ -265,7 +265,7 @@ async def generate_site_analysis(
 
 async def _ollama_chat(messages: list[dict], model: str, temperature: float, max_tokens: int) -> str:
     """Call Ollama /api/chat and return the assistant content string."""
-    # The Gandalf gateway proxies /api/* → GPU. Ollama's /api/chat maps directly.
+    # The Mithrandir gateway proxies /api/* -> GPU. Ollama's /api/chat maps directly.
     url = f"{_OLLAMA_URL}/api/chat"
     payload = {
         "model": model,

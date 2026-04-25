@@ -793,3 +793,234 @@
   100% { background-position: -200% 0; }
 }
 
+/* ============================================================
+   Avalon UI Overhaul — MUI-first visual refresh (2026-04-24)
+   ============================================================ */
+
+.siting-root {
+  grid-template-columns: 344px minmax(0, 1fr) 330px;
+  gap: 12px;
+  padding: 12px;
+  background:
+    radial-gradient(circle at 8% 10%, rgba(0, 229, 255, 0.08) 0%, rgba(0, 229, 255, 0) 34%),
+    radial-gradient(circle at 100% 0%, rgba(255, 149, 0, 0.12) 0%, rgba(255, 149, 0, 0) 42%),
+    linear-gradient(180deg, #06080f 0%, #0a0d17 100%);
+}
+
+.siting-side,
+.siting-rank,
+.siting-mapwrap {
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 45px rgba(1, 4, 12, 0.55);
+}
+
+.siting-side,
+.siting-rank {
+  background: linear-gradient(180deg, var(--surface-1) 0%, var(--surface-2) 100%);
+  backdrop-filter: blur(8px);
+}
+
+.siting-side-head {
+  padding: 16px 16px 12px;
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.10), rgba(255, 149, 0, 0.08));
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.siting-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 0.1em;
+  color: #e6efff;
+  text-shadow: 0 0 18px rgba(0, 229, 255, 0.18);
+}
+
+.siting-sub {
+  color: var(--white-dim);
+  letter-spacing: 0.12em;
+  font-size: 10px;
+}
+
+.siting-block {
+  padding: 14px 16px 16px;
+  border-bottom: 1px solid rgba(136, 153, 170, 0.13);
+}
+
+.siting-block-head {
+  color: #b7c8ea;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.siting-block-meta { color: #9cb1d9; }
+
+.layer-group-head {
+  color: #7fa3dd;
+  border-bottom: 1px solid rgba(127, 163, 221, 0.25);
+}
+
+.layer-row {
+  border-radius: 8px;
+  padding: 4px 6px;
+}
+
+.layer-row:hover {
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.layer-row.on {
+  background: rgba(95, 114, 255, 0.14);
+}
+
+.layer-name {
+  color: #dbe6ff;
+}
+
+.layer-note {
+  font-size: 8px;
+  color: #8da3cd;
+}
+
+.ingest-hint,
+.coverage-badge {
+  border-radius: 10px;
+  border: 1px solid rgba(95, 114, 255, 0.26);
+  border-left-width: 1px;
+  background: rgba(95, 114, 255, 0.12);
+  color: #d5e1ff;
+}
+
+.dq-queue,
+.dq-row {
+  border-radius: 10px;
+  border-left-width: 2px;
+}
+
+.siting-mapwrap {
+  background: #05070d;
+}
+
+.map-toolbar,
+.map-legend {
+  background: rgba(9, 13, 24, 0.78);
+  border: 1px solid rgba(136, 153, 170, 0.35);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.map-toolbar {
+  top: 14px;
+  left: 14px;
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.map-toolbar button,
+.map-toolbar .basemap-select {
+  border-radius: 999px;
+  border-color: rgba(0, 229, 255, 0.45);
+}
+
+.map-toolbar button.active {
+  background: rgba(0, 229, 255, 0.18);
+}
+
+.map-legend {
+  top: 72px;
+  left: 14px;
+  min-width: 244px;
+}
+
+.map-legend-head {
+  color: #e5eeff;
+  font-size: 10px;
+}
+
+.map-legend-name {
+  color: #dbe6ff;
+}
+
+.site-detail,
+.parcel-popup {
+  border-radius: 14px;
+  border: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, rgba(9, 13, 24, 0.95) 0%, rgba(17, 24, 42, 0.92) 100%);
+}
+
+.detail-head {
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.12), rgba(95, 114, 255, 0.16));
+}
+
+.detail-id {
+  color: #e6efff;
+}
+
+.detail-tbl th {
+  background: rgba(9, 14, 27, 0.88);
+  color: #8da3cd;
+}
+
+.rank-row {
+  margin: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.rank-row:hover {
+  background: rgba(95, 114, 255, 0.12);
+  border-color: rgba(95, 114, 255, 0.25);
+}
+
+.rank-row.sel {
+  background: rgba(0, 229, 255, 0.14);
+  border-color: rgba(0, 229, 255, 0.45);
+  border-left-width: 1px;
+  padding-left: 14px;
+}
+
+.rank-id {
+  color: #dbe6ff;
+}
+
+.rank-score {
+  font-family: var(--font-display);
+  font-size: 22px;
+}
+
+@media (max-width: 1360px) {
+  .siting-root {
+    grid-template-columns: 318px minmax(0, 1fr) 292px;
+    gap: 10px;
+    padding: 10px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .siting-root {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    overflow: auto;
+  }
+
+  .siting-mapwrap {
+    order: 1;
+    min-height: 46vh;
+  }
+
+  .siting-side {
+    order: 2;
+    min-height: 36vh;
+    max-height: 42vh;
+  }
+
+  .siting-rank {
+    order: 3;
+    min-height: 28vh;
+    max-height: 34vh;
+  }
+}
+

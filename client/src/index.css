@@ -3,13 +3,14 @@
    Palette: near-black bg / amber text / cyan accent / red alert
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Sora:wght@400;500;600;700&family=Share+Tech+Mono&family=VT323&display=swap');
 
 :root {
   --bg:          #07080d;
   --bg-panel:    #0b0d14;
   --bg-input:    #0f1119;
   --border:      #1a2035;
+  --border-soft: #202946;
   --amber:       #ff9500;
   --amber-dim:   #b36900;
   --amber-glow:  #ff950030;
@@ -20,8 +21,11 @@
   --green-dim:   #1e6b2a;
   --red:         #ff1a40;
   --white-dim:   #8899aa;
-  --font-mono:   'Share Tech Mono', 'Courier New', monospace;
-  --font-display:'VT323', 'Share Tech Mono', monospace;
+  --font-mono:   'Sora', 'Share Tech Mono', monospace;
+  --font-code:   'Share Tech Mono', monospace;
+  --font-display:'Rajdhani', 'VT323', monospace;
+  --surface-1:   rgba(11, 15, 27, 0.84);
+  --surface-2:   rgba(17, 24, 42, 0.86);
   --glow-spread: 8px;
   --transition:  120ms ease;
 }
@@ -30,16 +34,17 @@
 
 html, body, #root {
   height: 100%; overflow: hidden;
-  background: var(--bg); color: var(--amber);
+  background: var(--bg); color: #d7e2ff;
   font-family: var(--font-mono); font-size: 13px; line-height: 1.5;
-  -webkit-font-smoothing: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* Scanline overlay */
 body::after {
   content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
   background: repeating-linear-gradient(0deg, transparent, transparent 2px,
-    rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 4px);
+    rgba(0,0,0,0.015) 2px, rgba(0,0,0,0.015) 4px);
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }

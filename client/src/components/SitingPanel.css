@@ -1024,3 +1024,185 @@
   }
 }
 
+@media (max-width: 768px) {
+  .siting-root {
+    gap: 8px;
+    padding: 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .siting-mapwrap {
+    min-height: 52vh;
+  }
+
+  .siting-side,
+  .siting-rank {
+    min-height: 30vh;
+    max-height: none;
+  }
+
+  .siting-side-head {
+    padding: 12px 12px 10px;
+  }
+
+  .siting-title {
+    font-size: 20px;
+    letter-spacing: 0.08em;
+  }
+
+  .siting-block {
+    padding: 12px;
+  }
+
+  .weight-list {
+    max-height: 40vh;
+  }
+
+  .map-toolbar {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    gap: 6px;
+    padding: 8px;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .map-toolbar button,
+  .map-toolbar .basemap-select {
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  .map-toolbar .basemap-select {
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .bbox-readout {
+    display: none;
+  }
+
+  .map-legend {
+    top: auto;
+    bottom: 10px;
+    left: 8px;
+    right: 8px;
+    max-width: none;
+    min-width: 0;
+    max-height: 34vh;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .site-detail,
+  .site-detail.collapsed,
+  .parcel-popup,
+  .parcel-popup.with-site-panel,
+  .parcel-popup.with-detail-open {
+    top: auto;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-width: none;
+  }
+
+  .site-detail,
+  .site-detail.with-modal {
+    bottom: 8px;
+    max-height: 52vh;
+    right: 8px;
+  }
+
+  .parcel-popup,
+  .parcel-popup.with-site-panel,
+  .parcel-popup.with-detail-open {
+    bottom: 8px;
+    max-height: 56vh;
+    overflow-y: auto;
+    z-index: 7;
+  }
+
+  .detail-head {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .detail-id {
+    font-size: 14px;
+  }
+
+  .detail-score {
+    font-size: 24px;
+  }
+
+  .rank-row {
+    grid-template-columns: 30px 1fr 60px;
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  .rank-id {
+    font-size: 12px;
+  }
+
+  .rank-score {
+    font-size: 19px;
+  }
+
+  .layer-row,
+  .link-btn,
+  .primary-btn {
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 520px) {
+  .siting-mapwrap {
+    min-height: 50vh;
+  }
+
+  .siting-title {
+    font-size: 18px;
+  }
+
+  .siting-sub,
+  .siting-block-meta,
+  .layer-note {
+    font-size: 9px;
+  }
+
+  .map-toolbar {
+    gap: 5px;
+    padding: 7px;
+  }
+
+  .map-toolbar button,
+  .map-toolbar .basemap-select {
+    min-height: 32px;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+  }
+
+  .map-legend {
+    max-height: 30vh;
+  }
+
+  .site-detail,
+  .site-detail.with-modal,
+  .parcel-popup,
+  .parcel-popup.with-site-panel,
+  .parcel-popup.with-detail-open {
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+  }
+
+  .detail-tbl th,
+  .detail-tbl td {
+    padding: 3px 5px;
+  }
+}
+

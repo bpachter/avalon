@@ -50,6 +50,12 @@ body::after {
     rgba(0,0,0,0.015) 2px, rgba(0,0,0,0.015) 4px);
 }
 
+@media (hover: none) and (pointer: coarse) {
+  body::after {
+    opacity: 0.35;
+  }
+}
+
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--amber-dim); }

@@ -28,12 +28,12 @@ export default function App() {
             backdropFilter: 'blur(10px)',
           }}
         >
-          <Toolbar variant="dense" sx={{ minHeight: 56, px: 2, gap: 1.5 }}>
+          <Toolbar variant="dense" sx={{ minHeight: 56, px: { xs: 1.25, sm: 2 }, gap: { xs: 1, sm: 1.5 } }}>
             <Typography
               component="span"
               sx={{
                 fontFamily: 'var(--font-display)',
-                fontSize: 28,
+                fontSize: { xs: 22, sm: 28 },
                 color: avalonPalette.amber,
                 textShadow: `0 0 18px rgba(255,149,0,0.45), 0 0 34px rgba(255,149,0,0.25)`,
                 letterSpacing: '0.16em',
@@ -61,6 +61,7 @@ export default function App() {
                 fontSize: 11,
                 color: avalonPalette.whiteDim,
                 letterSpacing: '0.1em',
+                display: { xs: 'none', sm: 'inline' },
                 '&:hover': { color: avalonPalette.cyan },
               }}
             >

@@ -175,7 +175,22 @@ export default function SiteDetailsModal({ site, open, onClose }: SiteDetailsMod
   if (!site) return null
   const killed = Object.values(site.kill_flags ?? {}).some(Boolean)
   return (
-    <Drawer anchor="right" open={open} onClose={onClose} slotProps={{ paper: { sx: { width: '420px', bgcolor: avalonPalette.bgPanel, borderLeft: `1px solid ${avalonPalette.border}`, overflowY: 'auto' } } }}>
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      slotProps={{
+        paper: {
+          sx: {
+            width: { xs: '100vw', sm: '420px' },
+            maxWidth: '100vw',
+            bgcolor: avalonPalette.bgPanel,
+            borderLeft: `1px solid ${avalonPalette.border}`,
+            overflowY: 'auto',
+          },
+        },
+      }}
+    >
       <Box sx={{ p: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6" sx={{ fontFamily: '"VT323", monospace', fontSize: 18, letterSpacing: '0.1em' }}>SITE DETAILS</Typography>

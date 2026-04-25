@@ -280,6 +280,46 @@
 .map-toolbar .basemap-select:hover { border-color: var(--cyan); }
 .bbox-readout { font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
 
+.pegman-btn {
+  background: rgba(255, 180, 0, 0.1);
+  border-color: #ffb300 !important;
+  color: #ffcc4d !important;
+}
+.pegman-btn:hover { background: rgba(255, 180, 0, 0.2) !important; }
+
+.pegman-drag {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  pointer-events: none;
+  background: rgba(14, 18, 24, 0.9);
+  color: #ffcc4d;
+  border: 1px solid #ffb300;
+  padding: 4px 7px;
+  border-radius: 3px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  box-shadow: 0 0 14px rgba(255, 179, 0, 0.35);
+}
+
+.pegman-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid #0e1218;
+  background: #ffb300;
+  color: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  box-shadow: 0 0 12px rgba(255, 179, 0, 0.5);
+  cursor: pointer;
+}
+
 .map-legend {
   position: absolute;
   top: 64px;

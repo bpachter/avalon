@@ -320,6 +320,53 @@ function boundaryContainsPoint(
   return false
 }
 
+function isRoadLikeFeature(f: any): boolean {
+  const layerId = String(f?.layer?.id ?? '').toLowerCase()
+  if (/(road|street|highway|motorway|transport|primary|secondary|tertiary)/.test(layerId)) {
+    return true
+  }
+  const p = f?.properties ?? {}
+  for (const k of ['class', 'subclass', 'type', 'kind', 'fclass', 'highway']) {
+    const v = String(p[k] ?? '').toLowerCase()
+    if (/(road|street|highway|motorway|trunk|primary|secondary|tertiary|residential|service)/.test(v)) {
+      return true
+    }
+  }
+  return false
+}
+
+function nearestRoadLngLat(map: MLMap, x: number, y: number): maplibregl.LngLat {
+  const canvas = map.getCanvas()
+  const w = canvas.clientWidth
+  const h = canvas.clientHeight
+  const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
+  const pointHasRoad = (px: number, py: number) => {
+    const cx = clamp(px, 0, w - 1)
+    const cy = clamp(py, 0, h - 1)
+    const feats = map.queryRenderedFeatures([cx, cy])
+    return feats.some(isRoadLikeFeature)
+  }
+
+  if (pointHasRoad(x, y)) return map.unproject([x, y])
+
+  const step = 4
+  const radius = 32
+  for (let r = step; r <= radius; r += step) {
+    for (let d = -r; d <= r; d += step) {
+      const ring: Array<[number, number]> = [
+        [x + d, y - r],
+        [x + d, y + r],
+        [x - r, y + d],
+        [x + r, y + d],
+      ]
+      for (const [px, py] of ring) {
+        if (pointHasRoad(px, py)) return map.unproject([px, py])
+      }
+    }
+  }
+  return map.unproject([x, y])
+}
+
 function boundaryBbox(
   fc: { features?: Array<{ geometry?: { coordinates?: any } }> },
 ): [number, number, number, number] | null {
@@ -464,8 +511,11 @@ export default function SitingPanel() {
   const [drawnFeatures, setDrawnFeatures] = useState<DrawnFeature[]>([])
   const [drawMode, setDrawMode] = useState<DrawMode>('none')
   const [terrainOn, setTerrainOn] = useState<boolean>(false)
+  const [pegmanDragging, setPegmanDragging] = useState(false)
+  const [pegmanPos, setPegmanPos] = useState<{ x: number; y: number } | null>(null)
   const [overlayErr, setOverlayErr] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const pegmanMarkerRef = useRef<maplibregl.Marker | null>(null)
 
   const [coverage, setCoverage] = useState<CoverageReport | null>(null)
   const [coverageLoading, setCoverageLoading] = useState(false)
@@ -1318,6 +1368,74 @@ export default function SitingPanel() {
     })
   }
 
+  function openStreetViewAt(lat: number, lon: number) {
+    const u = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat.toFixed(6)},${lon.toFixed(6)}`
+    window.open(u, '_blank', 'noopener,noreferrer')
+  }
+
+  function setPegmanMarker(lat: number, lon: number) {
+    const map = mapRef.current
+    if (!map) return
+    if (!pegmanMarkerRef.current) {
+      const el = document.createElement('div')
+      el.className = 'pegman-marker'
+      el.title = 'Street View handoff point'
+      el.innerText = 'SV'
+      pegmanMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+      el.addEventListener('click', () => {
+        const ll = pegmanMarkerRef.current?.getLngLat()
+        if (!ll) return
+        openStreetViewAt(ll.lat, ll.lng)
+      })
+    }
+    pegmanMarkerRef.current.setLngLat([lon, lat]).addTo(map)
+  }
+
+  function dropPegmanAtClient(clientX: number, clientY: number) {
+    const map = mapRef.current
+    const mapDiv = mapDivRef.current
+    if (!map || !mapDiv) return
+    const rect = mapDiv.getBoundingClientRect()
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+      return
+    }
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    const ll = nearestRoadLngLat(map, x, y)
+    setPegmanMarker(ll.lat, ll.lng)
+    openStreetViewAt(ll.lat, ll.lng)
+  }
+
+  function beginPegmanDrag(e: any) {
+    e.preventDefault()
+    setPegmanDragging(true)
+    setPegmanPos({ x: e.clientX, y: e.clientY })
+  }
+
+  useEffect(() => {
+    if (!pegmanDragging) return
+    const onMove = (ev: MouseEvent) => setPegmanPos({ x: ev.clientX, y: ev.clientY })
+    const onUp = (ev: MouseEvent) => {
+      dropPegmanAtClient(ev.clientX, ev.clientY)
+      setPegmanDragging(false)
+      setPegmanPos(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pegmanDragging])
+
+  useEffect(() => {
+    return () => {
+      pegmanMarkerRef.current?.remove()
+      pegmanMarkerRef.current = null
+    }
+  }, [])
+
   function flyToDrawn(f: DrawnFeature) {
     const map = mapRef.current
     if (!map) return
@@ -1762,6 +1880,13 @@ export default function SitingPanel() {
       <div className="siting-mapwrap">
         <div ref={mapDivRef} className="siting-map" />
         <div className="map-toolbar">
+          <button
+            className={`pegman-btn ${pegmanDragging ? 'active' : ''}`}
+            onMouseDown={beginPegmanDrag}
+            title="Drag Pegman onto map to open Street View"
+          >
+            PEGMAN
+          </button>
           <select
             className="basemap-select"
             value={basemap}
@@ -1776,6 +1901,11 @@ export default function SitingPanel() {
             {bbox && `${bbox[1].toFixed(2)}°N ${bbox[0].toFixed(2)}°E → ${bbox[3].toFixed(2)}°N ${bbox[2].toFixed(2)}°E`}
           </span>
         </div>
+        {pegmanDragging && pegmanPos && (
+          <div className="pegman-drag" style={{ left: pegmanPos.x, top: pegmanPos.y }}>
+            PEG
+          </div>
+        )}
         {/* In-flight overlay-fetch indicator. Pulses while any layer is
             loading so the user sees the system is working — important now
             that pans collapse to the cache and "instant" can otherwise look

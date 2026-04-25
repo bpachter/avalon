@@ -37,6 +37,7 @@ class IndexedLayer:
     source: str
     layer: str
     points: list[tuple[float, float]]      # [(lat, lon), ...] — densified
+    point_feature_idx: list[int]           # parallel to points — index into raw_features
     raw_features: list[dict]               # original GeoJSON features (for map render)
     geojson_path: Path
 
@@ -52,6 +53,31 @@ class IndexedLayer:
             if best is None or d < best:
                 best = d
         return best
+
+    def nearest_with_properties(
+        self, lat: float, lon: float
+    ) -> tuple[float, dict[str, Any]] | None:
+        """Return (distance_mi, feature_properties) for the nearest feature.
+
+        The properties dict is a shallow copy of the GeoJSON feature's
+        ``properties`` object so callers can safely mutate it.
+        """
+        if not self.points:
+            return None
+        best_d: float | None = None
+        best_fi: int = 0
+        for i, (plat, plon) in enumerate(self.points):
+            if abs(plat - lat) > 5.0:
+                continue
+            d = haversine_mi(lat, lon, plat, plon)
+            if best_d is None or d < best_d:
+                best_d = d
+                best_fi = self.point_feature_idx[i]
+        if best_d is None:
+            return None
+        feat = self.raw_features[best_fi]
+        props = dict(feat.get("properties") or {})
+        return best_d, props
 
     def features_in_bbox(
         self, minx: float, miny: float, maxx: float, maxy: float, limit: int | None = None
@@ -122,12 +148,18 @@ def _densify_line(coords: list[list[float]], step_mi: float = 1.0) -> Iterable[t
         prev_lat, prev_lon = y, x
 
 
-def _features_to_points(features: list[dict], step_mi: float = 1.0) -> list[tuple[float, float]]:
+def _features_to_points(
+    features: list[dict], step_mi: float = 1.0
+) -> tuple[list[tuple[float, float]], list[int]]:
+    """Return (points, feature_indices) where points are densified (lat, lon)
+    and feature_indices[i] gives the index in *features* for points[i]."""
     pts: list[tuple[float, float]] = []
-    for f in features:
+    fidxs: list[int] = []
+    for fi, f in enumerate(features):
         geom = f.get("geometry") or {}
         t = geom.get("type")
         coords = geom.get("coordinates") or []
+        start = len(pts)
         if t == "Point" and coords:
             pts.append((coords[1], coords[0]))
         elif t == "MultiPoint":
@@ -143,7 +175,8 @@ def _features_to_points(features: list[dict], step_mi: float = 1.0) -> list[tupl
             bb = _geom_bbox(geom)
             if bb:
                 pts.append(((bb[1] + bb[3]) / 2, (bb[0] + bb[2]) / 2))
-    return pts
+        fidxs.extend([fi] * (len(pts) - start))
+    return pts, fidxs
 
 
 @lru_cache(maxsize=32)
@@ -155,12 +188,13 @@ def load_layer(source: str, layer: str) -> IndexedLayer | None:
         return None
     fc = json.loads(gj_path.read_text())
     feats = fc.get("features") or []
-    pts = _features_to_points(feats)
+    pts, fidxs = _features_to_points(feats)
     logger.info("loaded %s/%s: %d features, %d densified points", source, layer, len(feats), len(pts))
     return IndexedLayer(
         source=source,
         layer=layer,
         points=pts,
+        point_feature_idx=fidxs,
         raw_features=feats,
         geojson_path=gj_path,
     )

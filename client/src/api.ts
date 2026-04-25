@@ -349,3 +349,36 @@ export async function fetchParcelAttrs(
     return { error: String(e) }
   }
 }
+
+// ─── AI Analysis ──────────────────────────────────────────────────────────
+
+export interface AiAnalysisResponse {
+  site_id: string
+  narratives: Record<string, string>  // factor_name -> narrative text, plus "overall_summary"
+}
+
+export async function requestAiAnalysis(payload: {
+  site_id: string
+  lat: number
+  lon: number
+  state?: string
+  composite?: number
+  factors: Record<string, { provenance?: Record<string, unknown>; [k: string]: unknown }>
+  model?: string
+}): Promise<AiAnalysisResponse | { error: string }> {
+  try {
+    const r = await fetch(`${BASE}/api/siting/ai-analysis`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!r.ok) {
+      let j: { error?: string } = {}
+      try { j = await r.json() } catch { /* ignore */ }
+      return { error: j.error ?? `HTTP ${r.status}` }
+    }
+    return await parseJsonOrThrow<AiAnalysisResponse>(r, 'siting/ai-analysis')
+  } catch (e) {
+    return { error: String(e) }
+  }
+}

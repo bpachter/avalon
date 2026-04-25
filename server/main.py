@@ -2851,3 +2851,114 @@ def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
         result["substation_error"] = str(e)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# HIFLD admin download endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/api/admin/hifld-download")
+async def admin_hifld_download(layer: str | None = None):
+    """Trigger download of HIFLD spatial data used by scoring factors.
+
+    POST /api/admin/hifld-download           — download all layers
+    POST /api/admin/hifld-download?layer=transmission_230kv_plus — single layer
+
+    This is a long-running operation (can take several minutes for full CONUS
+    transmission lines).  Returns immediately with a status dict; check
+    /api/admin/hifld-status for cache state.
+    """
+    import threading
+
+    def _run():
+        scoring_root = _resolve_scoring_root()
+        if scoring_root is None:
+            logger.warning("HIFLD download: scoring root not found")
+            return
+        if str(scoring_root) not in sys.path:
+            sys.path.insert(0, str(scoring_root))
+        try:
+            from src.ingest import hifld as _hifld  # type: ignore
+            if layer:
+                result = _hifld.download(layer)
+                logger.info("HIFLD download complete: %s -> %s", layer, result)
+            else:
+                results = _hifld.download_all()
+                logger.info("HIFLD download_all complete: %s", results)
+        except Exception as exc:
+            logger.exception("HIFLD download failed: %s", exc)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    return {
+        "status": "started",
+        "layer": layer or "all",
+        "note": "Download running in background thread. Check /api/admin/hifld-status for progress.",
+    }
+
+
+@app.get("/api/admin/hifld-status")
+def admin_hifld_status():
+    """Return cache status for all HIFLD layers."""
+    scoring_root = _resolve_scoring_root()
+    if scoring_root is None:
+        return {"error": "scoring root not found"}
+    if str(scoring_root) not in sys.path:
+        sys.path.insert(0, str(scoring_root))
+    try:
+        from src.ingest import hifld as _hifld  # type: ignore
+        return _hifld.cache_status()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# AI Analysis endpoint
+# ---------------------------------------------------------------------------
+
+class AiAnalysisRequest(BaseModel):
+    site_id: str
+    lat: float
+    lon: float
+    state: str = ""
+    composite: float = 0.0
+    factors: dict  # {factor_name: {raw, normalized, weighted, provenance, ...}}
+    model: str | None = None
+
+
+@app.post("/api/siting/ai-analysis")
+async def siting_ai_analysis(req: AiAnalysisRequest):
+    """Generate GPT-4o AI narrative analysis for a scored site.
+
+    Accepts the full factors dict from the score result and returns
+    per-factor narratives plus an executive summary.
+
+    Requires OPENAI_API_KEY env variable on the server.
+    """
+    here = Path(__file__).resolve().parent
+    if str(here) not in sys.path:
+        sys.path.insert(0, str(here))
+
+    try:
+        from ai_analysis import generate_site_analysis  # type: ignore
+    except ImportError as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"ai_analysis module unavailable: {exc}"},
+        )
+
+    try:
+        narratives = await generate_site_analysis(
+            site_id=req.site_id,
+            lat=req.lat,
+            lon=req.lon,
+            state=req.state,
+            composite=req.composite,
+            factors=req.factors,
+            model=req.model,
+        )
+        return {"site_id": req.site_id, "narratives": narratives}
+    except Exception as exc:
+        logger.exception("AI analysis failed for %s: %s", req.site_id, exc)
+        return JSONResponse(status_code=500, content={"error": str(exc)})

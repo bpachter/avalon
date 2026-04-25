@@ -632,8 +632,9 @@ export default function SitingPanel() {
             // merged into transmission for a single combined toggle
             next[l.key] = false
           } else if (l.key === `${activeState.toLowerCase()}_parcels`) {
-            // Active state's parcel layer defaults ON.
-            next[l.key] = prev[l.key] ?? true
+            // Active state's parcel layer defaults OFF at startup (2D).
+            // It is auto-enabled when entering 3D mode.
+            next[l.key] = false
           } else {
             next[l.key] = prev[l.key] ?? defaultsOn.has(l.key)
           }
@@ -1151,11 +1152,11 @@ export default function SitingPanel() {
           changed = true
         }
       }
-      // Keep the active state's parcel layer ON by default as users switch
-      // states so parcel context is immediately visible in 2D. In 3D, parcel
-      // outlines are intentionally hidden to reduce clutter.
-      if (!terrainOn && activeParcelKey in next && !next[activeParcelKey]) {
-        next[activeParcelKey] = true
+      // Parcel outlines are mode-coupled: OFF in 2D, ON in 3D.
+      const desiredParcelOn = terrainOn
+      if (activeParcelKey in next && next[activeParcelKey] !== desiredParcelOn) {
+        next[activeParcelKey] = desiredParcelOn
+        if (!desiredParcelOn) removeOverlay(activeParcelKey)
         changed = true
       }
       enabledRef.current = next
@@ -1250,7 +1251,7 @@ export default function SitingPanel() {
       let changed = false
       for (const k of Object.keys(prev)) {
         if (!k.endsWith('_parcels')) continue
-        const shouldBeOn = !threeDOn && k === activeParcelKey
+        const shouldBeOn = threeDOn && k === activeParcelKey
         if (next[k] !== shouldBeOn) {
           next[k] = shouldBeOn
           changed = true
@@ -1261,7 +1262,7 @@ export default function SitingPanel() {
       }
       return changed ? next : prev
     })
-    if (threeDOn) setParcelPopup(null)
+    if (!threeDOn) setParcelPopup(null)
   }, [activeParcelLayerKey, activeState, reloadOverlay, removeOverlay])
 
   // Auto 3D policy: ON at z >= 13, OFF below. This keeps terrain/buildings

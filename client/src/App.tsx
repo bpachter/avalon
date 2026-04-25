@@ -1,6 +1,4 @@
-import { ThemeProvider, CssBaseline, AppBar, Toolbar, Typography, Box, Link, Chip } from '@mui/material'
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
-import HubIcon from '@mui/icons-material/Hub'
+import { ThemeProvider, CssBaseline, AppBar, Toolbar, Typography, Box, Link } from '@mui/material'
 import SitingPanel from './components/SitingPanel'
 import { avalonTheme, avalonPalette } from './theme'
 
@@ -53,33 +51,8 @@ export default function App() {
                 display: { xs: 'none', md: 'inline' },
               }}
             >
-              GEOSPATIAL SITING · 14 FACTORS · REAL-TIME LAYER INTELLIGENCE
+              QUANTITATIVE DATA CENTER SITING
             </Typography>
-            <Chip
-              size="small"
-              icon={<AutoAwesomeIcon sx={{ fontSize: 14 }} />}
-              label="MUI OVERHAUL"
-              sx={{
-                ml: 1,
-                height: 22,
-                borderColor: 'rgba(0,229,255,0.35)',
-                color: avalonPalette.cyan,
-                display: { xs: 'none', lg: 'inline-flex' },
-              }}
-              variant="outlined"
-            />
-            <Chip
-              size="small"
-              icon={<HubIcon sx={{ fontSize: 14 }} />}
-              label="SITING ENGINE LIVE"
-              sx={{
-                height: 22,
-                borderColor: 'rgba(57,211,83,0.35)',
-                color: avalonPalette.green,
-                display: { xs: 'none', xl: 'inline-flex' },
-              }}
-              variant="outlined"
-            />
             <Link
               href="https://bpachter.github.io"
               underline="none"

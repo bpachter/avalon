@@ -46,6 +46,7 @@ import {
   fetchParcelDetail,
   fetchParcelAttrs,
   scoreSites,
+  isAbortError,
   type Archetype,
   type LiveLayer,
   type SiteResultDTO,
@@ -437,6 +438,11 @@ function generateClientStateCandidates(
 export default function SitingPanel() {
   const mapDivRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MLMap | null>(null)
+  const sitesHandlersRef = useRef<Array<{
+    type: 'click' | 'mouseenter' | 'mouseleave'
+    layerId: string
+    fn: (e: any) => void
+  }> | null>(null)
   // Tracks per-overlay event-listener fns so we can remove them when the
   // overlay is toggled off (otherwise toggling repeatedly leaks N listeners
   // and a single click would fire N popups).
@@ -450,6 +456,19 @@ export default function SitingPanel() {
   // generation are discarded. Without this, a slow upstream can re-add a
   // layer the user already deselected.
   const overlayGenRef = useRef<Map<string, number>>(new Map())
+  // Per-overlay AbortController so a fresh reload tears down any
+  // still-in-flight fetch for the same key — critical for fast pan/zoom
+  // sequences and state switches where the user has clearly moved on.
+  const overlayAbortersRef = useRef<Map<string, AbortController>>(new Map())
+  // Aborter for the parcel-popup proximity + attrs fetch pair. Reset when
+  // the popup closes, the user clicks a different parcel, or the active
+  // state changes mid-flight.
+  const parcelAbortRef = useRef<AbortController | null>(null)
+  // Aborter for the data-quality coverage probe; replaced on each refresh.
+  const coverageAbortRef = useRef<AbortController | null>(null)
+  // Coalesce per-state-change reload timers so a fast NC → SC → NC sequence
+  // doesn't queue overlapping reload waves; only the latest survives.
+  const flyReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Per-overlay enabled state mirror so async fetches can short-circuit
   // even before the next render commits the state change.
   const enabledRef = useRef<Record<string, boolean>>({})
@@ -511,6 +530,11 @@ export default function SitingPanel() {
   const [drawnFeatures, setDrawnFeatures] = useState<DrawnFeature[]>([])
   const [drawMode, setDrawMode] = useState<DrawMode>('none')
   const [terrainOn, setTerrainOn] = useState<boolean>(false)
+  // True once the user has manually toggled terrain. From that point the
+  // auto-3D effect (zoom-driven on/off) defers to the user — otherwise the
+  // auto effect re-fires after the toggle and immediately overrides them,
+  // making the toggle look broken at z ≥ 13.
+  const userTerrainOverrideRef = useRef<boolean>(false)
   const [pegmanDragging, setPegmanDragging] = useState(false)
   const [pegmanPos, setPegmanPos] = useState<{ x: number; y: number } | null>(null)
   const [overlayErr, setOverlayErr] = useState<string | null>(null)
@@ -520,6 +544,14 @@ export default function SitingPanel() {
   const [coverage, setCoverage] = useState<CoverageReport | null>(null)
   const [coverageLoading, setCoverageLoading] = useState(false)
   const [coverageErr, setCoverageErr] = useState<string | null>(null)
+
+  const detachSiteHandlers = useCallback((map: MLMap) => {
+    const handlers = sitesHandlersRef.current
+    if (!handlers) return
+    for (const h of handlers) map.off(h.type, h.layerId, h.fn)
+    sitesHandlersRef.current = null
+    if (map.getCanvas().style.cursor === 'pointer') map.getCanvas().style.cursor = ''
+  }, [])
 
   const activeParcelLayerKey = useMemo(() => {
     const target = `${activeState.toLowerCase()}_parcels`
@@ -532,16 +564,30 @@ export default function SitingPanel() {
   }, [layers, activeState])
 
   const refreshCoverage = useCallback(async (state: string) => {
+    // Single-flight: a fast state switch (NC → SC → NC) would otherwise
+    // race two coverage probes — whichever replied last would paint stale
+    // data. Abort the prior one before starting.
+    coverageAbortRef.current?.abort()
+    const aborter = new AbortController()
+    coverageAbortRef.current = aborter
     setCoverageLoading(true)
     setCoverageErr(null)
-    const res = await fetchSitingCoverage(state)
-    if ('error' in res) {
-      setCoverageErr(res.error)
+    try {
+      const res = await fetchSitingCoverage(state, undefined, 1500, aborter.signal)
+      if (aborter.signal.aborted) return
+      if ('error' in res) {
+        setCoverageErr(res.error)
+        setCoverage(null)
+      } else {
+        setCoverage(res)
+      }
+    } catch (e) {
+      if (isAbortError(e)) return
+      setCoverageErr(String(e))
       setCoverage(null)
-    } else {
-      setCoverage(res)
+    } finally {
+      if (!aborter.signal.aborted) setCoverageLoading(false)
     }
-    setCoverageLoading(false)
   }, [])
 
   const sanitizeOverrides = useCallback((overrides?: Record<string, number>) => {
@@ -694,12 +740,33 @@ export default function SitingPanel() {
     map.on('moveend', updateBbox)
     map.on('zoomend', updateBbox)
     return () => {
+      // Cancel every in-flight upstream fetch we own so the unmounting
+      // component doesn't race a late setState onto a torn-down React tree
+      // (and we stop wasting bandwidth on data nobody will see).
+      for (const ac of overlayAbortersRef.current.values()) {
+        try { ac.abort() } catch { /* ignore */ }
+      }
+      overlayAbortersRef.current.clear()
+      parcelAbortRef.current?.abort()
+      parcelAbortRef.current = null
+      coverageAbortRef.current?.abort()
+      coverageAbortRef.current = null
+      if (flyReloadTimerRef.current !== null) {
+        clearTimeout(flyReloadTimerRef.current)
+        flyReloadTimerRef.current = null
+      }
+      detachSiteHandlers(map)
       drawCtrlRef.current?.destroy()
       drawCtrlRef.current = null
       map.remove()
       mapRef.current = null
     }
-  }, [basemap])
+    // Map is created exactly once. Basemap *swaps* are handled by the
+    // setStyle effect below — re-running the init effect would tear
+    // down the map (losing KMZ data, drawn features, terrain mode, and
+    // every overlay) before that setStyle restoration logic could run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── candidate site source/layer (re-render when sites change) ─────────
   useEffect(() => {
@@ -765,12 +832,22 @@ export default function SitingPanel() {
           'text-halo-width': 1.4,
         },
       })
-      map.on('click', LYR, (e) => {
-        const f = e.features?.[0]
-        if (f) setSelectedId(String(f.properties?.site_id))
-      })
-      map.on('mouseenter', LYR, () => { map.getCanvas().style.cursor = 'pointer' })
-      map.on('mouseleave', LYR, () => { map.getCanvas().style.cursor = '' })
+      if (!sitesHandlersRef.current) {
+        const onClick = (e: any) => {
+          const f = e.features?.[0]
+          if (f) setSelectedId(String(f.properties?.site_id))
+        }
+        const onEnter = () => { map.getCanvas().style.cursor = 'pointer' }
+        const onLeave = () => { map.getCanvas().style.cursor = '' }
+        map.on('click', LYR, onClick)
+        map.on('mouseenter', LYR, onEnter)
+        map.on('mouseleave', LYR, onLeave)
+        sitesHandlersRef.current = [
+          { type: 'click', layerId: LYR, fn: onClick },
+          { type: 'mouseenter', layerId: LYR, fn: onEnter },
+          { type: 'mouseleave', layerId: LYR, fn: onLeave },
+        ]
+      }
     }
   }, [sites, mapReady])
 
@@ -783,6 +860,14 @@ export default function SitingPanel() {
 
   const removeOverlay = useCallback((key: string) => {
     const map = mapRef.current
+    // Cancel any in-flight fetch for this key. The gen-counter bump below
+    // would have dropped the response anyway, but aborting avoids the wire
+    // and CPU cost of finishing the request after the user has moved on.
+    const inflight = overlayAbortersRef.current.get(key)
+    if (inflight) {
+      try { inflight.abort() } catch { /* ignore */ }
+      overlayAbortersRef.current.delete(key)
+    }
     // Bump generation so any in-flight reload for this key is dropped
     // when it lands. Survives a missing map (e.g. style swap mid-flight).
     overlayGenRef.current.set(key, (overlayGenRef.current.get(key) ?? 0) + 1)
@@ -825,6 +910,17 @@ export default function SitingPanel() {
     // Always send the active state — the backend clips every layer to the
     // selected state's bbox so heavy overlays load quickly even at zoom-out.
     const stateFilter: string | null = activeState || null
+    // Abort any previous in-flight fetch for this key. With aggressive
+    // pan/zoom the previous request is often still mid-flight when we start
+    // the next one — without this, we'd waste bandwidth and (more
+    // importantly) the slow response could clobber the fast one.
+    const previousAborter = overlayAbortersRef.current.get(key)
+    if (previousAborter) {
+      try { previousAborter.abort() } catch { /* ignore */ }
+    }
+    const aborter = new AbortController()
+    overlayAbortersRef.current.set(key, aborter)
+    const signal = aborter.signal
     // Bump generation; if it changes before we land, discard the response.
     const myGen = (overlayGenRef.current.get(key) ?? 0) + 1
     overlayGenRef.current.set(key, myGen)
@@ -849,29 +945,43 @@ export default function SitingPanel() {
       lyr.key === 'county_subdivisions' ? 2500 :
       50000
     let data: any
-    if (key === 'transmission') {
-      // Merge Duke-owned lines into the base transmission overlay so the UI has
-      // one toggle and one unified voltage legend.
-      const [baseData, dukeData] = await Promise.all([
-        fetchSitingProxyGeoJSON('transmission', bbox, limit, stateFilter, zoom),
-        fetchSitingProxyGeoJSON('transmission_duke', bbox, limit, stateFilter, zoom),
-      ])
-      const baseOk = !('error' in baseData)
-      const dukeOk = !('error' in dukeData)
-      if (!baseOk && !dukeOk) {
-        setLayerStatus(s => ({ ...s, [key]: 'error' }))
-        return
+    try {
+      if (key === 'transmission') {
+        // Merge Duke-owned lines into the base transmission overlay so the UI has
+        // one toggle and one unified voltage legend.
+        const [baseData, dukeData] = await Promise.all([
+          fetchSitingProxyGeoJSON('transmission', bbox, limit, stateFilter, zoom, signal),
+          fetchSitingProxyGeoJSON('transmission_duke', bbox, limit, stateFilter, zoom, signal),
+        ])
+        const baseOk = !('error' in baseData)
+        const dukeOk = !('error' in dukeData)
+        if (!baseOk && !dukeOk) {
+          setLayerStatus(s => ({ ...s, [key]: 'error' }))
+          return
+        }
+        const mergedFeatures: any[] = []
+        if (baseOk && Array.isArray((baseData as any).features)) mergedFeatures.push(...(baseData as any).features)
+        if (dukeOk && Array.isArray((dukeData as any).features)) mergedFeatures.push(...(dukeData as any).features)
+        data = { type: 'FeatureCollection', features: mergedFeatures }
+      } else {
+        data = await fetchSitingProxyGeoJSON(key, bbox, limit, stateFilter, zoom, signal)
+        if ('error' in data) {
+          setLayerStatus(s => ({ ...s, [key]: 'error' }))
+          return
+        }
       }
-      const mergedFeatures: any[] = []
-      if (baseOk && Array.isArray((baseData as any).features)) mergedFeatures.push(...(baseData as any).features)
-      if (dukeOk && Array.isArray((dukeData as any).features)) mergedFeatures.push(...(dukeData as any).features)
-      data = { type: 'FeatureCollection', features: mergedFeatures }
-    } else {
-      data = await fetchSitingProxyGeoJSON(key, bbox, limit, stateFilter, zoom)
-      if ('error' in data) {
-        setLayerStatus(s => ({ ...s, [key]: 'error' }))
-        return
-      }
+    } catch (e) {
+      // Abort is the expected outcome of a superseding reload — leave
+      // status untouched so the newer reload's 'loading' state stays.
+      if (signal.aborted || isAbortError(e)) return
+      setLayerStatus(s => ({ ...s, [key]: 'error' }))
+      return
+    }
+    // Guard against late returns from a fetch that another caller has
+    // already superseded by aborting + replacing our entry in the map.
+    if (signal.aborted) return
+    if (overlayAbortersRef.current.get(key) === aborter) {
+      overlayAbortersRef.current.delete(key)
     }
     // Capture per-operator counts/colors from the data_centers payload so
     // the legend reflects what's currently in view.
@@ -1025,6 +1135,14 @@ export default function SitingPanel() {
           const onClick = (e: any) => {
             const f = e.features?.[0]
             if (!f) return
+            // Cancel any prior parcel fetch — clicking a new parcel mid-load
+            // would otherwise let the slower response paint over the newer
+            // one. Per-popup AbortController; lives until the popup closes
+            // or another parcel is clicked.
+            parcelAbortRef.current?.abort()
+            const aborter = new AbortController()
+            parcelAbortRef.current = aborter
+            const sig = aborter.signal
             setParcelPopup({
               lat: e.lngLat.lat,
               lon: e.lngLat.lng,
@@ -1032,11 +1150,13 @@ export default function SitingPanel() {
               loading: true,
             })
             // Kick off proximity + enrichment in parallel.
-            fetchParcelDetail(e.lngLat.lat, e.lngLat.lng).then(d => {
+            fetchParcelDetail(e.lngLat.lat, e.lngLat.lng, 5, sig).then(d => {
+              if (sig.aborted) return
               if ('error' in d) return
               setParcelPopup(p => p && { ...p, detail: d })
-            })
-            fetchParcelAttrs(e.lngLat.lat, e.lngLat.lng, activeState).then(a => {
+            }).catch(err => { if (!isAbortError(err)) throw err })
+            fetchParcelAttrs(e.lngLat.lat, e.lngLat.lng, activeState, sig).then(a => {
+              if (sig.aborted) return
               if ('error' in a) {
                 setParcelPopup(p => p && { ...p, loading: false })
                 return
@@ -1048,7 +1168,7 @@ export default function SitingPanel() {
                 props: a.parcel ? { ...p.props, ...a.parcel } : p.props,
                 loading: false,
               })
-            })
+            }).catch(err => { if (!isAbortError(err)) throw err })
           }
           // Bind to the hit fill so hover/click work on the parcel interior,
           // not just the 1px outline.
@@ -1139,6 +1259,11 @@ export default function SitingPanel() {
       [[s.bbox[0], s.bbox[1]], [s.bbox[2], s.bbox[3]]] as LngLatBoundsLike,
       { padding: 60, duration: 800 },
     )
+    // The previous state's parcel popup is meaningless once we've flown
+    // somewhere else. Cancel its in-flight fetches and clear the surface.
+    parcelAbortRef.current?.abort()
+    parcelAbortRef.current = null
+    setParcelPopup(null)
     // Drop any parcel layer from a different state — only the active state's
     // parcel overlay should be loaded at any given time.
     const activeParcelKey = activeParcelLayerKey ?? `${activeState.toLowerCase()}_parcels`
@@ -1162,11 +1287,21 @@ export default function SitingPanel() {
       enabledRef.current = next
       return changed ? next : prev
     })
-    // State changed \u2014 every enabled overlay must re-fetch with the new\n    // state filter. Bump generations on all of them so any in-flight\n    // responses for the old state are dropped, then trigger reload.
+    // State changed \u2014 every enabled overlay must re-fetch with the new
+    // state filter. Abort + bump generation on each so any in-flight
+    // responses for the old state are dropped, then trigger reload after
+    // fitBounds has had a chance to settle.
     for (const k of Object.keys(enabledRef.current)) {
+      const inflight = overlayAbortersRef.current.get(k)
+      if (inflight) {
+        try { inflight.abort() } catch { /* ignore */ }
+        overlayAbortersRef.current.delete(k)
+      }
       overlayGenRef.current.set(k, (overlayGenRef.current.get(k) ?? 0) + 1)
     }
-    setTimeout(() => {
+    if (flyReloadTimerRef.current !== null) clearTimeout(flyReloadTimerRef.current)
+    flyReloadTimerRef.current = setTimeout(() => {
+      flyReloadTimerRef.current = null
       for (const [key, on] of Object.entries(enabledRef.current)) {
         if (on && !(key.endsWith('_parcels') && key !== activeParcelKey)) {
           reloadOverlay(key)
@@ -1181,6 +1316,7 @@ export default function SitingPanel() {
     const map = mapRef.current
     if (!map || !mapReady) return
     const target = styleFor(basemap)
+    detachSiteHandlers(map)
     map.setStyle(target as any)
     map.once('styledata', () => {
       // The site source/layers and overlays were dropped with the old style.
@@ -1203,7 +1339,7 @@ export default function SitingPanel() {
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basemap])
+  }, [basemap, detachSiteHandlers])
 
   // ── re-score on archetype / weight changes ────────────────────────────
   async function rescoreAll() {
@@ -1266,10 +1402,13 @@ export default function SitingPanel() {
   }, [activeParcelLayerKey, activeState, reloadOverlay, removeOverlay])
 
   // Auto 3D policy: ON at z >= 13, OFF below. This keeps terrain/buildings
-  // in sync with zoom without requiring manual toggles.
+  // in sync with zoom without requiring manual toggles. Skipped once the
+  // user has explicitly used the 3D toggle — their preference is sticky for
+  // the rest of the session.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
+    if (userTerrainOverrideRef.current) return
     const shouldBeOn = zoom >= 13
     if (shouldBeOn === terrainOn) return
     if (shouldBeOn) {
@@ -1360,6 +1499,9 @@ export default function SitingPanel() {
   function toggleTerrain() {
     const map = mapRef.current
     if (!map) return
+    // Once the user touches the toggle, lock out the zoom-driven auto policy
+    // so it can't immediately overwrite the choice on the next zoom event.
+    userTerrainOverrideRef.current = true
     if (terrainOn) {
       disable3DBuildings(map)
       disableTerrain(map)
@@ -2032,7 +2174,11 @@ export default function SitingPanel() {
           <div className={`parcel-popup ${selected ? 'with-site-panel' : ''} ${detailOpen ? 'with-detail-open' : ''}`}>
             <div className="parcel-popup-head">
               <span>{(parcelPopup.props as any).__datacenter__ ? 'DATA CENTER' : 'PARCEL'}</span>
-              <button className="link-btn" onClick={() => setParcelPopup(null)}>×</button>
+              <button className="link-btn" onClick={() => {
+                parcelAbortRef.current?.abort()
+                parcelAbortRef.current = null
+                setParcelPopup(null)
+              }}>×</button>
             </div>
             <div className="parcel-popup-body">
               {(() => {

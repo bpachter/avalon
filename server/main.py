@@ -41,6 +41,37 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 # ---------------------------------------------------------------------------
+# Shared HTTP session
+# ---------------------------------------------------------------------------
+# Every upstream call (HIFLD, NCOneMap, TIGERweb, FEMA, Census, Overpass,
+# OSM-data) used to do `import requests; requests.get(...)` which opens a
+# fresh TLS connection per call. Under load this exhausts ephemeral ports
+# and pays a 150–300 ms TLS handshake on every request. A shared Session
+# with a pooled HTTPAdapter keeps connections warm and dramatically reduces
+# upstream latency. `Retry(total=0)` here because `_resilient_get` already
+# implements the retry/backoff policy we want — we don't want urllib3 to
+# silently retry on top of that.
+import requests as _requests
+from requests.adapters import HTTPAdapter as _HTTPAdapter
+try:
+    from urllib3.util.retry import Retry as _Retry
+except ImportError:  # pragma: no cover — urllib3 ships with requests
+    _Retry = None  # type: ignore[assignment]
+
+_HTTP_SESSION = _requests.Session()
+_HTTP_SESSION.headers.update({
+    "User-Agent": "avalon-siting/1.0 (+https://github.com/bpachter/avalon)",
+})
+_HTTP_ADAPTER = _HTTPAdapter(
+    pool_connections=20,
+    pool_maxsize=50,
+    max_retries=_Retry(total=0) if _Retry is not None else 0,
+)
+_HTTP_SESSION.mount("http://", _HTTP_ADAPTER)
+_HTTP_SESSION.mount("https://", _HTTP_ADAPTER)
+
+
+# ---------------------------------------------------------------------------
 # Scoring engine import
 # ---------------------------------------------------------------------------
 
@@ -777,14 +808,16 @@ def _resilient_get(url: str, *, timeout: int = 30, retries: int = 3):
     than propagate a 502 to the browser on the first hiccup, retry with
     exponential backoff so a momentarily-unreachable upstream doesn't
     break the whole overlay.
+
+    Routed through the module-level `_HTTP_SESSION` so connections to the
+    same upstream host are pooled across calls.
     """
     import time as _t
-    import requests as _rq
 
     last_exc: Exception | None = None
     for attempt in range(retries):
         try:
-            r = _rq.get(url, timeout=timeout)
+            r = _HTTP_SESSION.get(url, timeout=timeout)
             # Don't retry 4xx — those are request problems, not transient.
             if r.status_code < 500:
                 return r
@@ -872,14 +905,13 @@ def _state_fiber_sources(state: str, *, max_sources: int = 4) -> list[str]:
         f"optical fiber {full} type:\"Map Service\"",
     ]
 
-    import requests as _rq
     found: list[str] = []
     seen: set[str] = set()
     for q in queries:
         if len(found) >= max_sources:
             break
         try:
-            r = _rq.get(_FIBER_SEARCH_URL, params={"q": q, "f": "json", "num": 12}, timeout=15)
+            r = _HTTP_SESSION.get(_FIBER_SEARCH_URL, params={"q": q, "f": "json", "num": 12}, timeout=15)
             if r.status_code != 200:
                 continue
             data = r.json() or {}
@@ -894,7 +926,7 @@ def _state_fiber_sources(state: str, *, max_sources: int = 4) -> list[str]:
                 # Keep only line-geometry services so we don't chase unrelated
                 # non-fiber datasets returned by generic ArcGIS search.
                 try:
-                    meta = _rq.get(layer_url, params={"f": "json"}, timeout=8)
+                    meta = _HTTP_SESSION.get(layer_url, params={"f": "json"}, timeout=8)
                     if meta.status_code != 200:
                         continue
                     geom_type = str((meta.json() or {}).get("geometryType") or "")
@@ -1137,7 +1169,6 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
         f");"
         f"out geom;"
     )
-    import requests as _rq
     data: dict | None = None
     last_err: str | None = None
     # Overpass requires a real User-Agent header — returns HTTP 406 otherwise.
@@ -1150,7 +1181,7 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
     for ep in overpass_endpoints:
         try:
             # Tuple timeout = (connect_timeout, read_timeout)
-            r = _rq.post(
+            r = _HTTP_SESSION.post(
                 ep,
                 data={"data": ql},
                 headers=headers,
@@ -1242,21 +1273,49 @@ def _fiber_lines_fc(bbox_t: tuple[float, float, float, float], *, limit: int, st
 _TIGER_STATES = (
     "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/0"
 )
-_STATE_BOUNDARY_CACHE: dict[str, dict] = {}
-_STATE_POLYGON_CACHE: dict[str, object | None] = {}
+# Boundary geometry is static, but we cache *only* successful fetches and
+# expire after 24 h so that a single transient TIGERweb hiccup at cold-start
+# can't pin the process to "no boundary" for its lifetime.
+_STATE_BOUNDARY_TTL_SEC = 24 * 3600
+# Brief negative cache: when TIGERweb is down, keep failing fast for ~60 s
+# instead of stacking 20 s timeouts on every interaction. Short enough that
+# recovery is automatic.
+_STATE_BOUNDARY_NEG_TTL_SEC = 60
+_STATE_BOUNDARY_CACHE: dict[str, tuple[float, dict]] = {}
+_STATE_BOUNDARY_NEG_CACHE: dict[str, float] = {}
+# Polygon cache piggybacks on the boundary fetch; only successful geoms are
+# stored, so a failed boundary lookup will simply re-attempt next call.
+_STATE_POLYGON_CACHE: dict[str, object] = {}
 
 
 def _state_boundary_fc(state: str | None):
-    """Return the polygon outline of `state` from TIGERweb. Cached in-process."""
+    """Return the polygon outline of `state` from TIGERweb.
+
+    Successful results are cached for 24 h. Empty / non-200 / exception paths
+    are *not* cached so a transient TIGERweb outage doesn't poison the cache
+    permanently — the next caller retries the upstream.
+    """
     if not state:
         return {"type": "FeatureCollection", "features": [],
                 "_meta": {"layer": "state_boundary", "returned": 0, "live": True,
                           "warning": "state required"}}
     st = state.upper()
-    cached = _STATE_BOUNDARY_CACHE.get(st)
-    if cached is not None:
-        return cached
-    import requests as _rq
+    now = time.time()
+    cached_entry = _STATE_BOUNDARY_CACHE.get(st)
+    if cached_entry is not None:
+        ts, payload = cached_entry
+        if (now - ts) < _STATE_BOUNDARY_TTL_SEC:
+            return payload
+
+    # If we just failed for this state, return a fast empty so the caller can
+    # continue serving the rest of the page instead of waiting on a 20 s
+    # timeout each time.
+    neg_ts = _STATE_BOUNDARY_NEG_CACHE.get(st)
+    if neg_ts is not None and (now - neg_ts) < _STATE_BOUNDARY_NEG_TTL_SEC:
+        return {"type": "FeatureCollection", "features": [],
+                "_meta": {"layer": "state_boundary", "returned": 0, "live": True,
+                          "state": st, "warning": "boundary upstream unreachable (cached neg)"}}
+
     params = {
         "where": f"STUSAB='{st}'",
         "outFields": "STATE,STUSAB,NAME,GEOID",
@@ -1265,11 +1324,16 @@ def _state_boundary_fc(state: str | None):
         "returnGeometry": "true",
     }
     fc: dict = {"type": "FeatureCollection", "features": []}
+    fetched_ok = False
     try:
-        r = _rq.get(_TIGER_STATES + "/query", params=params,
+        r = _HTTP_SESSION.get(_TIGER_STATES + "/query", params=params,
                     headers={"User-Agent": "avalon-siting/1.0"}, timeout=20)
         if r.status_code == 200:
-            fc = r.json() or fc
+            parsed = r.json() or {}
+            feats = parsed.get("features") or []
+            if feats:
+                fc = parsed
+                fetched_ok = True
     except Exception:
         pass
     fc.setdefault("type", "FeatureCollection")
@@ -1281,21 +1345,30 @@ def _state_boundary_fc(state: str | None):
         "min_zoom": 0, "returned": len(fc.get("features", [])),
         "state": st, "live": True,
     }
-    _STATE_BOUNDARY_CACHE[st] = fc
+    if fetched_ok:
+        _STATE_BOUNDARY_CACHE[st] = (now, fc)
+        _STATE_BOUNDARY_NEG_CACHE.pop(st, None)
+    else:
+        _STATE_BOUNDARY_NEG_CACHE[st] = now
     return fc
 
 
 def _state_polygon_geom(state: str | None):
-    """Return shapely geometry for the selected state polygon (cached)."""
+    """Return shapely geometry for the selected state polygon.
+
+    Only successful geometry constructions are cached. Failures (missing
+    boundary, shapely import error, empty union) return None *without*
+    persisting that None — the next call re-attempts the upstream.
+    """
     if not state:
         return None
     st = state.upper()
-    if st in _STATE_POLYGON_CACHE:
-        return _STATE_POLYGON_CACHE[st]
+    cached = _STATE_POLYGON_CACHE.get(st)
+    if cached is not None:
+        return cached
     fc = _state_boundary_fc(st)
     feats = fc.get("features", []) if isinstance(fc, dict) else []
     if not feats:
-        _STATE_POLYGON_CACHE[st] = None
         return None
     try:
         from shapely.geometry import shape as _shape
@@ -1308,11 +1381,14 @@ def _state_polygon_geom(state: str | None):
             geom = _shape(g)
             if not geom.is_empty:
                 polys.append(geom)
-        poly = _unary_union(polys) if polys else None
+        if not polys:
+            return None
+        poly = _unary_union(polys)
+        if poly is None or getattr(poly, "is_empty", True):
+            return None
         _STATE_POLYGON_CACHE[st] = poly
         return poly
     except Exception:
-        _STATE_POLYGON_CACHE[st] = None
         return None
 
 
@@ -1362,13 +1438,12 @@ _PEERINGDB_TTL_SEC = 24 * 3600
 
 def _peeringdb_facilities_us() -> list[dict]:
     import time as _t
-    import requests as _rq
     now = _t.time()
     cached = _PEERINGDB_CACHE.get("data")
     if cached is not None and (now - _PEERINGDB_CACHE.get("fetched", 0.0)) < _PEERINGDB_TTL_SEC:
         return cached
     try:
-        r = _rq.get(_PEERINGDB_URL, params={"country": "US"},
+        r = _HTTP_SESSION.get(_PEERINGDB_URL, params={"country": "US"},
                     headers={"User-Agent": "avalon-siting/1.0"}, timeout=30)
         if r.status_code == 200:
             facs = r.json().get("data", []) or []
@@ -1569,7 +1644,6 @@ _CURATED_HYPERSCALER_CAMPUSES: list[dict] = [
 def _fetch_overpass_data_centers() -> list[dict]:
     """Fetch all US data-center features from OSM Overpass with 7-day TTL."""
     import time as _t
-    import requests as _rq
     now = _t.time()
     cached = _DC_CACHE.get("data")
     if cached is not None and (now - _DC_CACHE.get("fetched", 0.0)) < _DC_TTL_SEC:
@@ -1595,7 +1669,7 @@ def _fetch_overpass_data_centers() -> list[dict]:
     elements: list[dict] = []
     for endpoint in _OVERPASS_URLS:
         try:
-            r = _rq.post(
+            r = _HTTP_SESSION.post(
                 endpoint,
                 data={"data": query},
                 headers={"User-Agent": "avalon-siting/1.0 (datacenter-intelligence)"},
@@ -1760,7 +1834,11 @@ def _data_centers_fc(bbox_t: tuple[float, float, float, float], *, limit: int, s
 # polygons but is more reliable than tigerweb.geo.census.gov from Railway.
 # Used by the opposition-county layer to render flagged counties red.
 _HIFLD_COUNTIES = f"{_HIFLD2}/Counties_v1/FeatureServer/0"
-_OPPOSITION_CACHE: dict[str, dict] = {}
+# Opposition county polygons. Cache only successful, non-empty fetches with
+# a TTL — counties get added/removed over weeks, but we *never* want a single
+# 502 to lock us into "no opposition data" until the next deploy.
+_OPPOSITION_TTL_SEC = 6 * 3600
+_OPPOSITION_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _county_opposition_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
@@ -1782,8 +1860,14 @@ def _county_opposition_fc(bbox_t: tuple[float, float, float, float], *, limit: i
     feats: list[dict] = []
     xmin, ymin, xmax, ymax = bbox_t
 
+    now = time.time()
     for st_name in states_needed:
-        cached = _OPPOSITION_CACHE.get(st_name)
+        cached_entry = _OPPOSITION_CACHE.get(st_name)
+        cached: dict | None = None
+        if cached_entry is not None:
+            ts, payload = cached_entry
+            if (now - ts) < _OPPOSITION_TTL_SEC:
+                cached = payload
         if cached is None:
             counties_in_state = [c for s, c in flags.keys() if s == st_name]
             # Build a NAME IN (...) clause so we only fetch the polygons we need.
@@ -1797,13 +1881,25 @@ def _county_opposition_fc(bbox_t: tuple[float, float, float, float], *, limit: i
                 # Simplify polygons aggressively — we only need the silhouette.
                 "maxAllowableOffset": 0.005,
             }
+            fetched_ok = False
             try:
                 r = _resilient_get(_HIFLD_COUNTIES + "/query?" + urlencode(params),
                                    timeout=25, retries=3)
-                cached = r.json() if r.status_code == 200 else {"features": []}
+                if r.status_code == 200:
+                    parsed = r.json() or {"features": []}
+                    if parsed.get("features"):
+                        cached = parsed
+                        fetched_ok = True
+                    else:
+                        cached = parsed
+                else:
+                    cached = {"features": []}
             except Exception:  # noqa: BLE001
                 cached = {"features": []}
-            _OPPOSITION_CACHE[st_name] = cached
+            # Only cache successful, non-empty fetches. Otherwise leave the
+            # entry empty so the next request retries the upstream.
+            if fetched_ok:
+                _OPPOSITION_CACHE[st_name] = (now, cached)
 
         for cf in cached.get("features", []):
             props = cf.get("properties") or {}
@@ -2223,7 +2319,6 @@ def siting_proxy(
     truncated = False
     upstream_warning: str | None = None
     try:
-        import requests as _rq  # noqa: F401
         for source_url in source_urls:
             offset = 0
             source_key = source_url.split("/arcgis/")[0]
@@ -2579,7 +2674,6 @@ def siting_moratoriums():
 @app.get("/api/siting/parcel_detail")
 def siting_parcel_detail(lat: float, lon: float, radius_mi: float = 5.0):
     from math import asin, cos, radians, sin, sqrt
-    import requests as _rq
 
     def _haversine_mi(lat1, lon1, lat2, lon2):
         R = 3958.7613
@@ -2607,7 +2701,7 @@ def siting_parcel_detail(lat: float, lon: float, radius_mi: float = 5.0):
         else:
             url = _arcgis_query_url(cfg, bbox, page_size=2000, offset=0)
             try:
-                r = _rq.get(url, timeout=20)
+                r = _HTTP_SESSION.get(url, timeout=20)
                 data = r.json() if r.status_code == 200 else {}
             except Exception:
                 data = {}
@@ -2673,7 +2767,6 @@ def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
     All three calls are best-effort; partial data is returned on failure so
     the UI always gets a populated popup rather than a blank error.
     """
-    import requests as _rq
 
     result: dict = {"lat": lat, "lon": lon, "sources": []}
 
@@ -2697,7 +2790,7 @@ def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
         }
         url = parcel_cfg["url"] + "/query?" + urlencode(params)
         try:
-            r = _rq.get(url, timeout=15)
+            r = _HTTP_SESSION.get(url, timeout=15)
             if r.status_code == 200:
                 data = r.json()
                 feats = data.get("features") or []
@@ -2709,7 +2802,7 @@ def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
 
     # 2) Census Geocoder — county / tract / block
     try:
-        r = _rq.get(
+        r = _HTTP_SESSION.get(
             _CENSUS_GEOCODER,
             params={
                 "x": lon, "y": lat,
@@ -2749,7 +2842,7 @@ def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
             "returnGeometry": "false",
             "resultRecordCount": 1,
         }
-        r = _rq.get(_FEMA_NFHL + "?" + urlencode(params), timeout=15)
+        r = _HTTP_SESSION.get(_FEMA_NFHL + "?" + urlencode(params), timeout=15)
         if r.status_code == 200:
             feats = r.json().get("features") or []
             if feats:

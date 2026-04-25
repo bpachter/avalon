@@ -8,6 +8,12 @@ function delay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
 
+export function isAbortError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'AbortError') return true
+  if (e instanceof Error && e.name === 'AbortError') return true
+  return false
+}
+
 async function parseJsonOrThrow<T>(r: Response, label: string): Promise<T> {
   const body = await r.text()
   if (!r.ok) throw new Error(`${label} ${r.status}: ${body.slice(0, 200)}`)
@@ -20,6 +26,8 @@ async function fetchJson<T>(url: string, label: string, init?: RequestInit, atte
     try {
       return await parseJsonOrThrow<T>(await fetch(url, init), label)
     } catch (e) {
+      // Caller cancelled — don't retry, surface the abort immediately.
+      if (init?.signal?.aborted || isAbortError(e)) throw e
       if (i === attempts - 1) throw e
       await delay(120 * (i + 1))
     }
@@ -141,11 +149,11 @@ export interface ParcelAttrs {
 
 // ─── API calls ────────────────────────────────────────────────────────────
 
-export async function fetchSitingFactors(): Promise<SitingFactorsResponse> {
-  return fetchJson(`${BASE}/api/siting/factors`, 'siting/factors')
+export async function fetchSitingFactors(signal?: AbortSignal): Promise<SitingFactorsResponse> {
+  return fetchJson(`${BASE}/api/siting/factors`, 'siting/factors', { signal })
 }
 
-export async function fetchSitingSample(state?: string, count = 80): Promise<{
+export async function fetchSitingSample(state?: string, count = 80, signal?: AbortSignal): Promise<{
   results?: SiteResultDTO[]
   sites?: Array<{ site_id: string; lat: number; lon: number; [k: string]: unknown }>
   stub_coverage?: Record<string, number>
@@ -154,22 +162,22 @@ export async function fetchSitingSample(state?: string, count = 80): Promise<{
 }> {
   const params = new URLSearchParams({ count: String(count) })
   if (state) params.set('state', state)
-  return fetchJson(`${BASE}/api/siting/sample?${params}`, 'siting/sample')
+  return fetchJson(`${BASE}/api/siting/sample?${params}`, 'siting/sample', { signal })
 }
 
 export async function scoreSites(payload: {
   sites: Array<{ site_id: string; lat: number; lon: number; [k: string]: unknown }>
   archetype?: Archetype
   weight_overrides?: Record<string, number>
-}): Promise<{ results: SiteResultDTO[]; stub_coverage?: Record<string, number> }> {
+}, signal?: AbortSignal): Promise<{ results: SiteResultDTO[]; stub_coverage?: Record<string, number> }> {
   return fetchJson(
     `${BASE}/api/siting/score`, 'siting/score',
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal },
   )
 }
 
-export async function fetchSitingLiveLayers(): Promise<{ layers: LiveLayer[] }> {
-  return fetchJson(`${BASE}/api/siting/live_layers`, 'siting/live_layers')
+export async function fetchSitingLiveLayers(signal?: AbortSignal): Promise<{ layers: LiveLayer[] }> {
+  return fetchJson(`${BASE}/api/siting/live_layers`, 'siting/live_layers', { signal })
 }
 
 export async function fetchSitingProxyGeoJSON(
@@ -178,6 +186,7 @@ export async function fetchSitingProxyGeoJSON(
   limit = 8000,
   state?: string | null,
   zoom?: number | null,
+  signal?: AbortSignal,
 ): Promise<{ type: 'FeatureCollection'; features: unknown[]; _meta: Record<string, unknown> } | { error: string }> {
   const params = new URLSearchParams({ bbox: bbox.join(','), limit: String(limit) })
   if (state) params.set('state', state)
@@ -196,7 +205,7 @@ export async function fetchSitingProxyGeoJSON(
   }
 
   try {
-    const r = await fetch(`${BASE}/api/siting/proxy/${layerKey}?${params}`)
+    const r = await fetch(`${BASE}/api/siting/proxy/${layerKey}?${params}`, { signal })
     if (!r.ok) {
       let j: { error?: string } = {}
       try { j = await r.json() } catch { /* ignore */ }
@@ -205,9 +214,17 @@ export async function fetchSitingProxyGeoJSON(
     const data = await parseJsonOrThrow(r, `siting/proxy/${layerKey}`) as
       | { type: 'FeatureCollection'; features: unknown[]; _meta: Record<string, unknown> }
       | { error: string }
-    _proxyClientCachePut(cacheKey, data)
+    // Don't cache transient upstream warnings or server-shaped errors —
+    // they'd otherwise stick on the client for up to CLIENT_CACHE_TTL_MS,
+    // turning a 5-second blip into minutes of broken data on screen.
+    const isError = 'error' in data
+    const hasWarning = !isError && Boolean(
+      (data as { _meta?: { warning?: unknown } })._meta?.warning,
+    )
+    if (!isError && !hasWarning) _proxyClientCachePut(cacheKey, data)
     return data
   } catch (e) {
+    if (isAbortError(e)) throw e
     return { error: String(e) }
   }
 }
@@ -256,12 +273,12 @@ function _proxyClientCachePut(key: string, data: _CacheEntry['data']) {
   _proxyClientCache.set(key, { t: performance.now(), data })
 }
 
-export async function fetchSitingStates(): Promise<{ states: StateOption[]; duke_states: string[] }> {
-  return fetchJson(`${BASE}/api/siting/states`, 'siting/states')
+export async function fetchSitingStates(signal?: AbortSignal): Promise<{ states: StateOption[]; duke_states: string[] }> {
+  return fetchJson(`${BASE}/api/siting/states`, 'siting/states', { signal })
 }
 
-export async function fetchSitingMoratoriums(): Promise<{ counties: MoratoriumCounty[] }> {
-  return fetchJson(`${BASE}/api/siting/moratoriums`, 'siting/moratoriums')
+export async function fetchSitingMoratoriums(signal?: AbortSignal): Promise<{ counties: MoratoriumCounty[] }> {
+  return fetchJson(`${BASE}/api/siting/moratoriums`, 'siting/moratoriums', { signal })
 }
 
 export interface CoverageLayer {
@@ -299,11 +316,11 @@ export interface CoverageReport {
   layers: CoverageLayer[]
 }
 
-export async function fetchSitingCoverage(state: string, layers?: string[], limit = 1500): Promise<CoverageReport | { error: string }> {
+export async function fetchSitingCoverage(state: string, layers?: string[], limit = 1500, signal?: AbortSignal): Promise<CoverageReport | { error: string }> {
   const params = new URLSearchParams({ state, limit: String(limit) })
   if (layers && layers.length) params.set('layers', layers.join(','))
   try {
-    const r = await fetch(`${BASE}/api/siting/qa/coverage?${params}`)
+    const r = await fetch(`${BASE}/api/siting/qa/coverage?${params}`, { signal })
     if (!r.ok) {
       let j: { error?: string } = {}
       try { j = await r.json() } catch { /* ignore */ }
@@ -311,16 +328,17 @@ export async function fetchSitingCoverage(state: string, layers?: string[], limi
     }
     return await parseJsonOrThrow<CoverageReport>(r, 'siting/qa/coverage')
   } catch (e) {
+    if (isAbortError(e)) throw e
     return { error: String(e) }
   }
 }
 
 export async function fetchParcelDetail(
-  lat: number, lon: number, radius_mi = 5,
+  lat: number, lon: number, radius_mi = 5, signal?: AbortSignal,
 ): Promise<ParcelDetail | { error: string }> {
   const params = new URLSearchParams({ lat: String(lat), lon: String(lon), radius_mi: String(radius_mi) })
   try {
-    const r = await fetch(`${BASE}/api/siting/parcel_detail?${params}`)
+    const r = await fetch(`${BASE}/api/siting/parcel_detail?${params}`, { signal })
     if (!r.ok) {
       let j: { error?: string } = {}
       try { j = await r.json() } catch { /* ignore */ }
@@ -328,17 +346,18 @@ export async function fetchParcelDetail(
     }
     return await parseJsonOrThrow<ParcelDetail>(r, 'siting/parcel_detail')
   } catch (e) {
+    if (isAbortError(e)) throw e
     return { error: String(e) }
   }
 }
 
 export async function fetchParcelAttrs(
-  lat: number, lon: number, state?: string,
+  lat: number, lon: number, state?: string, signal?: AbortSignal,
 ): Promise<ParcelAttrs | { error: string }> {
   const params = new URLSearchParams({ lat: String(lat), lon: String(lon) })
   if (state) params.set('state', state)
   try {
-    const r = await fetch(`${BASE}/api/siting/parcel_attrs?${params}`)
+    const r = await fetch(`${BASE}/api/siting/parcel_attrs?${params}`, { signal })
     if (!r.ok) {
       let j: { error?: string } = {}
       try { j = await r.json() } catch { /* ignore */ }
@@ -346,6 +365,7 @@ export async function fetchParcelAttrs(
     }
     return await parseJsonOrThrow<ParcelAttrs>(r, 'siting/parcel_attrs')
   } catch (e) {
+    if (isAbortError(e)) throw e
     return { error: String(e) }
   }
 }
@@ -365,12 +385,13 @@ export async function requestAiAnalysis(payload: {
   composite?: number
   factors: Record<string, { provenance?: Record<string, unknown>; [k: string]: unknown }>
   model?: string
-}): Promise<AiAnalysisResponse | { error: string }> {
+}, signal?: AbortSignal): Promise<AiAnalysisResponse | { error: string }> {
   try {
     const r = await fetch(`${BASE}/api/siting/ai-analysis`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     })
     if (!r.ok) {
       let j: { error?: string } = {}
@@ -379,6 +400,7 @@ export async function requestAiAnalysis(payload: {
     }
     return await parseJsonOrThrow<AiAnalysisResponse>(r, 'siting/ai-analysis')
   } catch (e) {
+    if (isAbortError(e)) throw e
     return { error: String(e) }
   }
 }

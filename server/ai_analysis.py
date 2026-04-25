@@ -22,6 +22,24 @@ logger = logging.getLogger(__name__)
 _OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:26b")
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+_OLLAMA_VERIFY_SSL = _env_flag("OLLAMA_VERIFY_SSL", _OLLAMA_URL.startswith("https://"))
+_OLLAMA_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+_OLLAMA_LIMITS = httpx.Limits(max_connections=10, max_keepalive_connections=5)
+_OLLAMA_CONCURRENCY = max(1, int(os.environ.get("OLLAMA_MAX_CONCURRENCY", "4")))
+_OLLAMA_CLIENT = httpx.AsyncClient(
+    timeout=_OLLAMA_TIMEOUT,
+    verify=_OLLAMA_VERIFY_SSL,
+    limits=_OLLAMA_LIMITS,
+)
+
 # ---------------------------------------------------------------------------
 # Per-factor prompt templates
 # ---------------------------------------------------------------------------
@@ -276,11 +294,10 @@ async def _ollama_chat(messages: list[dict], model: str, temperature: float, max
             "num_predict": max_tokens,
         },
     }
-    async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
-        resp = await client.post(url, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        return data["message"]["content"]
+    resp = await _OLLAMA_CLIENT.post(url, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["message"]["content"]
 
 
 async def _generate_ollama(
@@ -289,6 +306,7 @@ async def _generate_ollama(
 ) -> dict[str, str]:
     used_model = model or _OLLAMA_MODEL
     narratives: dict[str, str] = {}
+    semaphore = asyncio.Semaphore(_OLLAMA_CONCURRENCY)
 
     async def _analyze_factor(factor_name: str, factor_data: dict) -> tuple[str, str]:
         prompt_template = _FACTOR_PROMPTS.get(factor_name)
@@ -304,15 +322,16 @@ async def _generate_ollama(
             provenance_json=json.dumps(prov, indent=2),
         )
         try:
-            text = await _ollama_chat(
-                messages=[
-                    {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": user_msg},
-                ],
-                model=used_model,
-                temperature=0.4,
-                max_tokens=400,
-            )
+            async with semaphore:
+                text = await _ollama_chat(
+                    messages=[
+                        {"role": "system", "content": _SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    model=used_model,
+                    temperature=0.4,
+                    max_tokens=400,
+                )
             return factor_name, text
         except Exception as exc:
             logger.warning("Ollama error for factor %s: %s", factor_name, exc)

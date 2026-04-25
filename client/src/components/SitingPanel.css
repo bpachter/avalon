@@ -292,15 +292,54 @@
   transform: translate(-50%, -50%);
   z-index: 30;
   pointer-events: none;
-  background: rgba(14, 18, 24, 0.9);
-  color: #ffcc4d;
-  border: 1px solid #ffb300;
-  padding: 4px 7px;
-  border-radius: 3px;
-  font-family: var(--font-display);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  box-shadow: 0 0 14px rgba(255, 179, 0, 0.35);
+  width: 26px;
+  height: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.pegman-icon {
+  width: 22px;
+  height: 26px;
+  background: linear-gradient(180deg, #ffd24d 0%, #ffb300 100%);
+  border: 1px solid #0e1218;
+  border-radius: 9px 9px 7px 7px;
+  box-shadow: 0 0 14px rgba(255, 179, 0, 0.45);
+  position: relative;
+}
+
+.pegman-head {
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  background: #ffe082;
+  border: 1px solid #0e1218;
+}
+
+.pegman-body {
+  position: absolute;
+  left: 50%;
+  top: 7px;
+  width: 4px;
+  height: 13px;
+  transform: translateX(-50%);
+  background: #101317;
+  border-radius: 2px;
+}
+
+.pegman-pin {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid #ffb300;
+  filter: drop-shadow(0 0 4px rgba(255, 179, 0, 0.45));
 }
 
 .pegman-marker {

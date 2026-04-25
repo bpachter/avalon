@@ -1173,7 +1173,7 @@ export default function SitingPanel() {
       }
     }, 900)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeState, stateOptions, mapReady, activeParcelLayerKey, terrainOn])
+  }, [activeState, stateOptions, mapReady, activeParcelLayerKey])
 
   // ── switch basemap (dark ↔ satellite) ─────────────────────────────────
   useEffect(() => {
@@ -1929,7 +1929,11 @@ export default function SitingPanel() {
         </div>
         {pegmanDragging && pegmanPos && (
           <div className="pegman-drag" style={{ left: pegmanPos.x, top: pegmanPos.y }}>
-            PEG
+            <span className="pegman-icon" aria-hidden>
+              <span className="pegman-head" />
+              <span className="pegman-body" />
+            </span>
+            <span className="pegman-pin" aria-hidden />
           </div>
         )}
         {/* In-flight overlay-fetch indicator. Pulses while any layer is

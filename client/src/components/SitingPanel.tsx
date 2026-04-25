@@ -7,6 +7,8 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 // MapLibre overlays render outside React anyway.
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import Divider from '@mui/material/Divider'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Select from '@mui/material/Select'
@@ -2424,9 +2426,27 @@ export default function SitingPanel() {
 
       {/* ── Right rail: ranked list ── */}
       <aside className="siting-rank">
-        <div className="siting-side-head">
-          <span className="siting-title">TOP {displayedRanked.length} · {activeState}</span>
-          <span className="siting-sub">{archetype}</span>
+        {/* Header */}
+        <Box
+          className="siting-side-head"
+          sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
+        >
+          <Box>
+            <Typography
+              className="siting-title"
+              component="span"
+              sx={{ display: 'block', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: { xs: 18, sm: 22 }, letterSpacing: '0.1em', color: '#e6efff' }}
+            >
+              TOP {displayedRanked.length} · {activeState}
+            </Typography>
+            <Typography
+              className="siting-sub"
+              component="span"
+              sx={{ display: 'block', fontSize: 10, color: avalonPalette.whiteDim, letterSpacing: '0.12em', textTransform: 'uppercase' }}
+            >
+              {archetype}
+            </Typography>
+          </Box>
           <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto' }}>
             <Tooltip title="Export as GeoJSON">
               <Button
@@ -2516,31 +2536,133 @@ export default function SitingPanel() {
               </Button>
             </Tooltip>
           </Box>
-        </div>
-        <ol className="rank-list">
+        </Box>
+
+        {/* Ranked rows */}
+        <Box
+          component="ol"
+          sx={{ listStyle: 'none', p: 0, m: 0, flex: 1, overflowY: 'auto' }}
+        >
           {displayedRanked.map((s, i) => {
             const killed = Object.values(s.kill_flags).some(Boolean)
+            const scoreColor = colorForScore(s.composite, killed)
+            const isSelected = selectedId === s.site_id
             return (
-              <li
+              <Box
+                component="li"
                 key={s.site_id}
-                className={`rank-row ${selectedId === s.site_id ? 'sel' : ''} ${killed ? 'killed' : ''}`}
                 onClick={() => {
                   flyTo(s)
                   setSelectedPanelCollapsed(false)
                   setDetailSite(s)
                   setDetailOpen(true)
                 }}
+                sx={{
+                  mx: 1,
+                  my: 0.5,
+                  px: 1.75,
+                  py: 1.25,
+                  minHeight: { xs: 52, sm: 44 },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 0.75,
+                  cursor: 'pointer',
+                  borderRadius: '10px',
+                  border: '1px solid',
+                  borderColor: isSelected ? 'rgba(0,229,255,0.45)' : 'transparent',
+                  bgcolor: isSelected ? 'rgba(0,229,255,0.10)' : 'transparent',
+                  transition: 'background 0.12s, border-color 0.12s',
+                  touchAction: 'manipulation',
+                  '&:hover': {
+                    bgcolor: isSelected ? 'rgba(0,229,255,0.14)' : 'rgba(95,114,255,0.10)',
+                    borderColor: isSelected ? 'rgba(0,229,255,0.45)' : 'rgba(95,114,255,0.22)',
+                  },
+                }}
               >
-                <span className="rank-idx">{i + 1}</span>
-                <span className="rank-id">{s.site_id}</span>
-                <span
-                  className="rank-score"
-                  style={{ color: colorForScore(s.composite, killed) }}
-                >{s.composite.toFixed(2)}</span>
-              </li>
+                {/* Row: rank # · site id · score */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                  <Typography sx={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: 13,
+                    color: avalonPalette.whiteDim,
+                    width: 22,
+                    textAlign: 'right',
+                    flexShrink: 0,
+                  }}>
+                    {i + 1}
+                  </Typography>
+                  <Typography sx={{
+                    flex: 1,
+                    fontSize: { xs: 12, sm: 11 },
+                    color: killed ? '#5a4040' : '#dbe6ff',
+                    letterSpacing: '0.05em',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    textDecoration: killed ? 'line-through' : 'none',
+                  }}>
+                    {s.site_id}
+                  </Typography>
+                  <Typography sx={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: { xs: 20, sm: 22 },
+                    lineHeight: 1,
+                    color: scoreColor,
+                    textShadow: `0 0 6px ${scoreColor}`,
+                    flexShrink: 0,
+                  }}>
+                    {s.composite.toFixed(2)}
+                  </Typography>
+                </Box>
+                {/* Score bar */}
+                {!killed && (
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.min(100, (s.composite / 10) * 100)}
+                    sx={{
+                      height: 3,
+                      borderRadius: 2,
+                      bgcolor: 'rgba(255,255,255,0.06)',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: scoreColor,
+                        boxShadow: `0 0 5px ${scoreColor}`,
+                        borderRadius: 2,
+                        transition: 'width 0.4s ease',
+                      },
+                    }}
+                  />
+                )}
+                {/* Kill chips */}
+                {killed && (
+                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                    {Object.entries(s.kill_flags).filter(([, v]) => v).map(([k]) => (
+                      <Chip
+                        key={k}
+                        label={`KILL: ${k}`}
+                        size="small"
+                        sx={{
+                          height: 16,
+                          fontSize: 9,
+                          fontFamily: '"VT323", monospace',
+                          letterSpacing: '0.08em',
+                          bgcolor: avalonPalette.red,
+                          color: '#fff',
+                          borderRadius: '3px',
+                        }}
+                      />
+                    ))}
+                  </Box>
+                )}
+              </Box>
             )
           })}
-        </ol>
+        </Box>
+        <Divider sx={{ borderColor: avalonPalette.border, mt: 0.5 }} />
+        <Box sx={{ px: 2, py: 1 }}>
+          <Typography sx={{ fontSize: 9, color: avalonPalette.whiteDim, letterSpacing: '0.08em' }}>
+            Click any site to open full 14-factor breakdown
+          </Typography>
+        </Box>
       </aside>
 
       <SiteDetailsModal site={detailSite} open={detailOpen} onClose={() => setDetailOpen(false)} />

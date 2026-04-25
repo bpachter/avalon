@@ -1152,8 +1152,9 @@ export default function SitingPanel() {
         }
       }
       // Keep the active state's parcel layer ON by default as users switch
-      // states so parcel context is immediately visible.
-      if (activeParcelKey in next && !next[activeParcelKey]) {
+      // states so parcel context is immediately visible in 2D. In 3D, parcel
+      // outlines are intentionally hidden to reduce clutter.
+      if (!terrainOn && activeParcelKey in next && !next[activeParcelKey]) {
         next[activeParcelKey] = true
         changed = true
       }
@@ -1172,7 +1173,7 @@ export default function SitingPanel() {
       }
     }, 900)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeState, stateOptions, mapReady, activeParcelLayerKey])
+  }, [activeState, stateOptions, mapReady, activeParcelLayerKey, terrainOn])
 
   // ── switch basemap (dark ↔ satellite) ─────────────────────────────────
   useEffect(() => {
@@ -1242,6 +1243,27 @@ export default function SitingPanel() {
     setSelectedId(s.site_id)
   }
 
+  const syncParcelOutlinesWith3D = useCallback((threeDOn: boolean) => {
+    const activeParcelKey = activeParcelLayerKey ?? `${activeState.toLowerCase()}_parcels`
+    setEnabledLayers(prev => {
+      const next = { ...prev }
+      let changed = false
+      for (const k of Object.keys(prev)) {
+        if (!k.endsWith('_parcels')) continue
+        const shouldBeOn = !threeDOn && k === activeParcelKey
+        if (next[k] !== shouldBeOn) {
+          next[k] = shouldBeOn
+          changed = true
+          if (shouldBeOn) reloadOverlay(k)
+          else removeOverlay(k)
+        }
+        enabledRef.current[k] = next[k]
+      }
+      return changed ? next : prev
+    })
+    if (threeDOn) setParcelPopup(null)
+  }, [activeParcelLayerKey, activeState, reloadOverlay, removeOverlay])
+
   // Auto 3D policy: ON at z >= 13, OFF below. This keeps terrain/buildings
   // in sync with zoom without requiring manual toggles.
   useEffect(() => {
@@ -1253,12 +1275,14 @@ export default function SitingPanel() {
       enableTerrain(map, 1.4)
       enable3DBuildings(map)
       setTerrainOn(true)
+      syncParcelOutlinesWith3D(true)
     } else {
       disable3DBuildings(map)
       disableTerrain(map)
       setTerrainOn(false)
+      syncParcelOutlinesWith3D(false)
     }
-  }, [zoom, mapReady, terrainOn])
+  }, [zoom, mapReady, terrainOn, syncParcelOutlinesWith3D])
 
   // Deep-dive drawer open: force the map's site panel to expanded mode so
   // users can compare both detail surfaces side-by-side.
@@ -1339,11 +1363,13 @@ export default function SitingPanel() {
       disable3DBuildings(map)
       disableTerrain(map)
       setTerrainOn(false)
+      syncParcelOutlinesWith3D(false)
       return
     }
     enableTerrain(map, 1.4)
     enable3DBuildings(map)
     setTerrainOn(true)
+    syncParcelOutlinesWith3D(true)
     // Buildings only appear at z≥13 — fly to something useful so the user
     // actually *sees* the change. Priority: selected site → top-ranked site
     // → a known city in the active state → current center.

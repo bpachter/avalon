@@ -509,6 +509,16 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "max_records": 5000, "page_size": 5000,
         "internal": True,
     },
+    "announced_builds": {
+        "name": "Announced AI builds", "group": "Datacenter intelligence",
+        "url": "__INTERNAL__/announced_builds",
+        "where": "1=1", "out_fields": "*",
+        "geom": "point", "color": "#f97316", "style": "power_source",
+        "min_zoom": 0,
+        "source": "Public press releases, permits, news (curated)",
+        "max_records": 500, "page_size": 500,
+        "internal": True,
+    },
     "nc_parcels": {
         "name": "Parcel outlines (NC)", "group": "Boundaries",
         "url": f"{_NCONEMAP}/NC1Map_Parcels/FeatureServer/1",
@@ -1640,6 +1650,178 @@ _CURATED_HYPERSCALER_CAMPUSES: list[dict] = [
     {"lat": 34.6080, "lon": -81.0270, "name": "Google Mt Holly / Berkeley",                 "operator": "Google", "city": "Goose Creek", "state": "SC"},
 ]
 
+# ── Announced AI data center builds — power-strategy intelligence layer ────
+# Inspired by Epoch AI / Yair Titelboim's analysis: hyperscalers are bypassing
+# congested public interconnection queues (e.g. ERCOT's 410 GW backlog) by
+# building off-grid private power infrastructure. Color-coding by power source
+# type — not operator — reveals that strategic choice.
+_POWER_SOURCE_COLORS: dict[str, str] = {
+    "private_gas":           "#f97316",  # orange  — private gas turbines / microgrid, islanded
+    "private_solar_storage": "#22c55e",  # green   — dedicated solar + BESS, private wire
+    "private_nuclear":       "#eab308",  # yellow  — nuclear PPA or co-located nuclear campus
+    "grid_gas_backup":       "#fb923c",  # amber   — grid-primary + gas turbines for firming
+    "grid":                  "#60a5fa",  # blue    — traditional grid, renewable PPAs
+    "unknown":               "#9ca3af",  # gray    — unknown / mixed strategy
+}
+
+_POWER_SOURCE_LABELS: dict[str, str] = {
+    "private_gas":           "Private gas microgrid",
+    "private_solar_storage": "Private solar + storage",
+    "private_nuclear":       "Nuclear PPA / co-located",
+    "grid_gas_backup":       "Grid + gas backup",
+    "grid":                  "Grid-connected",
+    "unknown":               "Unknown / mixed",
+}
+
+_ANNOUNCED_BUILDS: list[dict] = [
+    # Stargate (OpenAI / Oracle / SoftBank)
+    {
+        "lat": 32.45, "lon": -99.73, "state": "TX",
+        "name": "Stargate Phase 1 — Shackelford/Taylor County TX",
+        "operator": "OpenAI / Oracle / SoftBank (Stargate)",
+        "capacity_mw": 2000,
+        "power_source": "private_gas",
+        "power_desc": "Off-grid private natural-gas microgrid; not connected to ERCOT. "
+                      "ERCOT queue holds 410 GW of pending applications — private grid bypasses that entirely.",
+        "status": "Under construction",
+    },
+    {
+        "lat": 30.85, "lon": -96.97, "state": "TX",
+        "name": "Stargate — Milam County TX",
+        "operator": "OpenAI / Oracle / SoftBank (Stargate)",
+        "capacity_mw": None,
+        "power_source": "private_solar_storage",
+        "power_desc": "Dedicated solar farm + battery storage, private wire connection. "
+                      "Zero grid exposure; power strategy independent of ERCOT queue congestion.",
+        "status": "Under construction",
+    },
+    # xAI
+    {
+        "lat": 35.08, "lon": -90.02, "state": "TN",
+        "name": "xAI Colossus — Memphis TN",
+        "operator": "xAI",
+        "capacity_mw": 1200,
+        "power_source": "grid_gas_backup",
+        "power_desc": "MLGW grid connection + 35 Caterpillar mobile gas turbines for load firming. "
+                      "Temporary gas units drew EPA scrutiny; expanding to 1.2 GW+.",
+        "status": "Operational + expanding",
+    },
+    # Microsoft nuclear
+    {
+        "lat": 40.15, "lon": -76.72, "state": "PA",
+        "name": "Crane Clean Energy Center (TMI Unit 1 restart) — Middletown PA",
+        "operator": "Microsoft / Constellation Energy",
+        "capacity_mw": 835,
+        "power_source": "private_nuclear",
+        "power_desc": "Three Mile Island Unit 1 restarted under a 20-yr PPA with Microsoft. "
+                      "First nuclear plant restart in US history; dedicated to AI data center load.",
+        "status": "Operational (restarted Sep 2024)",
+    },
+    # Amazon / Talen nuclear
+    {
+        "lat": 41.09, "lon": -76.14, "state": "PA",
+        "name": "Amazon / Talen nuclear campus — Susquehanna PA",
+        "operator": "Amazon / Talen Energy",
+        "capacity_mw": 960,
+        "power_source": "private_nuclear",
+        "power_desc": "Proposed co-located data center campus at Susquehanna Steam Electric Station. "
+                      "FERC contested the behind-the-meter arrangement; regulatory outcome pending.",
+        "status": "Proposed (regulatory review)",
+    },
+    # Google / Energy Northwest nuclear
+    {
+        "lat": 46.47, "lon": -119.33, "state": "WA",
+        "name": "Columbia Generating Station nuclear PPA — Richland WA",
+        "operator": "Google / Energy Northwest",
+        "capacity_mw": 500,
+        "power_source": "private_nuclear",
+        "power_desc": "Google signed the first utility-scale nuclear PPA in the US (Oct 2024). "
+                      "Existing Columbia Generating Station + future SMR capacity.",
+        "status": "Announced (2024–2030+)",
+    },
+    # Meta
+    {
+        "lat": 41.93, "lon": -88.75, "state": "IL",
+        "name": "Meta AI campus — DeKalb IL",
+        "operator": "Meta",
+        "capacity_mw": 800,
+        "power_source": "grid",
+        "power_desc": "ComEd grid territory, wind PPAs. ~800 MW campus, one of Meta's largest.",
+        "status": "Under construction",
+    },
+    {
+        "lat": 40.31, "lon": -112.00, "state": "UT",
+        "name": "Meta data center — Eagle Mountain UT",
+        "operator": "Meta",
+        "capacity_mw": 500,
+        "power_source": "grid",
+        "power_desc": "Rocky Mountain Power grid (renewable mix), solar PPAs.",
+        "status": "Operational",
+    },
+    # Microsoft
+    {
+        "lat": 42.72, "lon": -88.14, "state": "WI",
+        "name": "Microsoft AI campus — Mount Pleasant WI",
+        "operator": "Microsoft",
+        "capacity_mw": 300,
+        "power_source": "grid",
+        "power_desc": "We Energies grid, renewable PPAs. Redevelopment of former Foxconn site.",
+        "status": "Under construction",
+    },
+    # CoreWeave
+    {
+        "lat": 47.24, "lon": -119.85, "state": "WA",
+        "name": "CoreWeave GPU campus — Quincy WA",
+        "operator": "CoreWeave",
+        "capacity_mw": 200,
+        "power_source": "grid",
+        "power_desc": "Grant County PUD grid (~80% hydroelectric); among lowest-cost clean power in CONUS.",
+        "status": "Under construction",
+    },
+    # Crusoe
+    {
+        "lat": 36.13, "lon": -119.07, "state": "CA",
+        "name": "Crusoe solar compute campus — Strathmore CA",
+        "operator": "Crusoe Energy",
+        "capacity_mw": 200,
+        "power_source": "private_solar_storage",
+        "power_desc": "Dedicated solar farm + BESS, off-grid compute. "
+                      "Leverages San Joaquin Valley's high DNI; zero grid exposure.",
+        "status": "Under construction",
+    },
+    # AWS
+    {
+        "lat": 39.02, "lon": -77.49, "state": "VA",
+        "name": "AWS US-East-1 AI expansion — Loudoun County VA",
+        "operator": "Amazon",
+        "capacity_mw": 2000,
+        "power_source": "grid",
+        "power_desc": "Dominion Energy grid; Loudoun County is the largest single DC market on Earth. "
+                      "Heavy renewable PPA coverage but fundamentally grid-dependent.",
+        "status": "Ongoing expansion",
+    },
+    # Oracle
+    {
+        "lat": 41.14, "lon": -104.82, "state": "WY",
+        "name": "Oracle data center campus — Cheyenne WY",
+        "operator": "Oracle",
+        "capacity_mw": 400,
+        "power_source": "grid",
+        "power_desc": "PacifiCorp grid in Wyoming's renewable energy zone (coal-to-wind transition).",
+        "status": "Operational",
+    },
+    # Google Iowa
+    {
+        "lat": 41.26, "lon": -95.86, "state": "IA",
+        "name": "Google data center — Council Bluffs IA",
+        "operator": "Google",
+        "capacity_mw": 1200,
+        "power_source": "grid",
+        "power_desc": "MidAmerican Energy grid (wind-heavy; >60% renewable). Google's largest Midwest campus.",
+        "status": "Operational",
+    },
+]
+
 
 def _fetch_overpass_data_centers() -> list[dict]:
     """Fetch all US data-center features from OSM Overpass with 7-day TTL."""
@@ -1827,6 +2009,60 @@ def _data_centers_fc(bbox_t: tuple[float, float, float, float], *, limit: int, s
             "operator_colors": operator_colors,
             "cache_age_hours": round((time.time() - cached_ts) / 3600, 1) if cached_ts else None,
             "ttl_hours": _DC_TTL_SEC // 3600,
+        },
+    }
+
+
+def _announced_builds_fc(bbox_t: tuple[float, float, float, float], *, limit: int, state: str | None):
+    """GeoJSON FeatureCollection of announced major AI data center builds.
+
+    Not state-clipped — these are national-scale intelligence points that span
+    CONUS. The viewport bbox still limits what is returned so load remains
+    proportional to zoom. Color-codes each point by power_source type so the
+    Yair Titelboim insight is immediately visible on the map: off-grid private
+    power (gas microgrid, solar+storage, nuclear) vs. traditional grid.
+    """
+    xmin, ymin, xmax, ymax = bbox_t
+    feats: list[dict] = []
+    for rec in _ANNOUNCED_BUILDS:
+        lat, lon = rec["lat"], rec["lon"]
+        if not (xmin <= lon <= xmax and ymin <= lat <= ymax):
+            continue
+        ps = rec.get("power_source", "unknown")
+        color = _POWER_SOURCE_COLORS.get(ps, _POWER_SOURCE_COLORS["unknown"])
+        cap_mw = rec.get("capacity_mw")
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "name": rec["name"],
+                "operator": rec.get("operator", "Unknown"),
+                "capacity_mw": cap_mw,
+                "capacity_label": f"{cap_mw:,} MW" if cap_mw else "TBD",
+                "power_source": ps,
+                "power_source_label": _POWER_SOURCE_LABELS.get(ps, ps),
+                "power_source_color": color,
+                "power_desc": rec.get("power_desc", ""),
+                "status": rec.get("status", ""),
+                "state": rec.get("state", ""),
+            },
+        })
+        if len(feats) >= limit:
+            break
+    return {
+        "type": "FeatureCollection",
+        "features": feats,
+        "_meta": {
+            "layer": "announced_builds",
+            "name": "Announced AI builds",
+            "source": "Public press releases, permits, news (curated)",
+            "group": "Datacenter intelligence",
+            "geom": "point", "color": "#f97316", "style": "power_source", "min_zoom": 0,
+            "returned": len(feats), "limit": limit,
+            "bbox": f"{xmin},{ymin},{xmax},{ymax}",
+            "live": True,
+            "power_source_colors": _POWER_SOURCE_COLORS,
+            "power_source_labels": _POWER_SOURCE_LABELS,
         },
     }
 
@@ -2263,6 +2499,8 @@ def siting_proxy(
             return _fiber_pops_fc(bbox_t, limit=limit, state=state)
         if layer_key == "data_centers":
             return _data_centers_fc(bbox_t, limit=limit, state=state)
+        if layer_key == "announced_builds":
+            return _announced_builds_fc(bbox_t, limit=limit, state=state)
 
     extra_where: str | None = None
     # Constrain ALL geographic layers to selected state. Single-state clipping

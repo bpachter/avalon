@@ -1010,6 +1010,29 @@
   font-size: 22px;
 }
 
+/* ── Deep Dive mode ─────────────────────────────────────────────────────── */
+/* When a site is open in deep-dive, collapse the left sidebar and widen    */
+/* the right rail to show the SiteIntelPanel (440 px).                     */
+.siting-root.deep-dive {
+  grid-template-columns: 0px minmax(0, 1fr) 440px;
+  transition: grid-template-columns 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.siting-root.deep-dive .siting-side {
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  min-width: 0;
+  padding: 0;
+  border: none;
+}
+
+.siting-root.deep-dive .siting-rank {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
 @media (max-width: 1360px) {
   .siting-root {
     grid-template-columns: 318px minmax(0, 1fr) 292px;

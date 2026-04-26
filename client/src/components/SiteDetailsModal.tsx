@@ -10,6 +10,7 @@ interface SiteDetailsModalProps {
   site: SiteResultDTO | null
   open: boolean
   onClose: () => void
+  onDeepDive?: (site: SiteResultDTO) => void
 }
 
 function factorColor(factor: FactorResultDTO): string {
@@ -170,7 +171,7 @@ function AiPanel({ site }: { site: SiteResultDTO }) {
   )
 }
 
-export default function SiteDetailsModal({ site, open, onClose }: SiteDetailsModalProps) {
+export default function SiteDetailsModal({ site, open, onClose, onDeepDive }: SiteDetailsModalProps) {
   const [activeTab, setActiveTab] = useState<'factors' | 'ai'>('factors')
   if (!site) return null
   const killed = Object.values(site.kill_flags ?? {}).some(Boolean)
@@ -228,10 +229,27 @@ export default function SiteDetailsModal({ site, open, onClose }: SiteDetailsMod
         {activeTab === 'factors' && <FactorsPanel site={site} />}
         {activeTab === 'ai' && <AiPanel site={site} />}
         <Divider sx={{ my: 2, borderColor: avalonPalette.border }} />
-        <Button variant="contained" fullWidth onClick={onClose}
-          sx={{ bgcolor: avalonPalette.cyan, color: avalonPalette.bg, fontFamily: '"VT323", monospace', textTransform: 'uppercase', letterSpacing: '0.1em', '&:hover': { bgcolor: avalonPalette.cyanDim } }}>
-          Close
-        </Button>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {onDeepDive && !killed && (
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={() => { onDeepDive(site); onClose() }}
+              sx={{
+                bgcolor: avalonPalette.amber, color: avalonPalette.bg,
+                fontFamily: '"VT323", monospace', fontSize: 16, textTransform: 'uppercase',
+                letterSpacing: '0.14em',
+                '&:hover': { bgcolor: avalonPalette.amberDim, boxShadow: `0 0 18px ${avalonPalette.amber}66` },
+              }}
+            >
+              3D SITE DEEP DIVE
+            </Button>
+          )}
+          <Button variant="contained" fullWidth onClick={onClose}
+            sx={{ bgcolor: avalonPalette.cyan, color: avalonPalette.bg, fontFamily: '"VT323", monospace', textTransform: 'uppercase', letterSpacing: '0.1em', '&:hover': { bgcolor: avalonPalette.cyanDim } }}>
+            Close
+          </Button>
+        </Box>
       </Box>
     </Drawer>
   )

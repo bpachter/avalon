@@ -452,6 +452,74 @@ export function disable3DBuildings(map: MLMap): void {
   if (map.getSource(BUILDINGS_SRC)) map.removeSource(BUILDINGS_SRC)
 }
 
+// ── 3D buildings — deep dive mode (typed by land use) ────────────────────────
+// Same OpenFreeMap vector source; different layer coloring.
+// Buildings are painted by `class` field from OpenMapTiles schema so a
+// siting analyst can instantly see: industrial (orange) = compatible use,
+// residential (slate) = permitting friction, commercial (green) = mixed.
+
+export const BUILDINGS_TYPED_LYR = 'avalon-3d-buildings-typed'
+
+export const DEEP_DIVE_BUILDING_PALETTE: Record<string, { color: string; label: string }> = {
+  industrial:  { color: '#f97316', label: 'Industrial / Warehouse' },
+  residential: { color: '#94a3b8', label: 'Residential' },
+  commercial:  { color: '#22c55e', label: 'Commercial' },
+  office:      { color: '#60a5fa', label: 'Office / Gov.' },
+  civic:       { color: '#eab308', label: 'Public / Education' },
+  other:       { color: '#6b7280', label: 'Other' },
+}
+
+export function enable3DBuildingsTyped(map: MLMap): void {
+  if (!map.getSource(BUILDINGS_SRC)) {
+    map.addSource(BUILDINGS_SRC, {
+      type: 'vector',
+      url: OPENFREEMAP_TILEJSON,
+      attribution: OPENFREEMAP_ATTR,
+    } as maplibregl.VectorSourceSpecification)
+  }
+  if (!map.getLayer(BUILDINGS_TYPED_LYR)) {
+    map.addLayer({
+      id: BUILDINGS_TYPED_LYR,
+      type: 'fill-extrusion',
+      source: BUILDINGS_SRC,
+      'source-layer': 'building',
+      minzoom: 13,
+      filter: ['!=', ['get', 'hide_3d'], true],
+      paint: {
+        'fill-extrusion-color': [
+          'match', ['get', 'class'],
+          ['industrial', 'warehouse', 'factory', 'storage', 'depot'],
+          '#f97316',
+          ['apartments', 'residential', 'house', 'detached', 'dormitory', 'semidetached_house', 'terrace'],
+          '#94a3b8',
+          ['commercial', 'retail', 'supermarket', 'kiosk', 'shop', 'hotel'],
+          '#22c55e',
+          ['office', 'government', 'civic'],
+          '#60a5fa',
+          ['school', 'university', 'hospital', 'public', 'church', 'religious', 'chapel', 'sports_hall', 'stadium'],
+          '#eab308',
+          '#6b7280',
+        ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<string>,
+        'fill-extrusion-height': [
+          'interpolate', ['linear'], ['zoom'],
+          13,   0,
+          13.5, ['coalesce', ['get', 'render_height'], 6],
+        ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>,
+        'fill-extrusion-base': [
+          'coalesce', ['get', 'render_min_height'], 0,
+        ] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number>,
+        'fill-extrusion-opacity': 0.94,
+        'fill-extrusion-vertical-gradient': true,
+      },
+    } as maplibregl.FillExtrusionLayerSpecification)
+  }
+}
+
+export function disable3DBuildingsTyped(map: MLMap): void {
+  if (map.getLayer(BUILDINGS_TYPED_LYR)) map.removeLayer(BUILDINGS_TYPED_LYR)
+  if (map.getSource(BUILDINGS_SRC)) map.removeSource(BUILDINGS_SRC)
+}
+
 // ── Export helpers ──────────────────────────────────────────────────────────
 
 export function downloadGeoJSON(fc: GeoJSON.FeatureCollection, filename: string): void {

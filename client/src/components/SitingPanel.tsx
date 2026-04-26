@@ -22,6 +22,7 @@ import LinearProgress from '@mui/material/LinearProgress'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { avalonPalette } from '../theme'
 import SiteDetailsModal from './SiteDetailsModal'
+import SiteIntelPanel from './SiteIntelPanel'
 import {
   parseKmzOrKml,
   bboxOfFC,
@@ -35,6 +36,8 @@ import {
   disableTerrain,
   enable3DBuildings,
   disable3DBuildings,
+  enable3DBuildingsTyped,
+  disable3DBuildingsTyped,
   downloadGeoJSON,
 } from './SiteOverlays'
 import {
@@ -524,6 +527,9 @@ export default function SitingPanel() {
   const [dcOperatorCounts, setDcOperatorCounts] = useState<Record<string, number>>({})
   const [dcOperatorColors, setDcOperatorColors] = useState<Record<string, string>>({})
   const [dcCacheAgeHours, setDcCacheAgeHours] = useState<number | null>(null)
+  // Power-source colors/labels for the announced_builds intelligence layer.
+  const [abColors, setAbColors] = useState<Record<string, string>>({})
+  const [abLabels, setAbLabels] = useState<Record<string, string>>({})
   // ── Site overlays · KMZ import + drawing + 3D terrain ─────────────────
   const drawCtrlRef = useRef<DrawController | null>(null)
   const importedFCRef = useRef<GeoJSON.FeatureCollection | null>(null)
@@ -538,6 +544,10 @@ export default function SitingPanel() {
   // auto effect re-fires after the toggle and immediately overrides them,
   // making the toggle look broken at z ≥ 13.
   const userTerrainOverrideRef = useRef<boolean>(false)
+  // Deep dive mode: when true, the left sidebar collapses and the right rail
+  // shows SiteIntelPanel with typed 3D buildings.
+  const [deepDive, setDeepDive] = useState<boolean>(false)
+  const deepDiveSiteRef = useRef<SiteResultDTO | null>(null)
   const [pegmanDragging, setPegmanDragging] = useState(false)
   const [pegmanPos, setPegmanPos] = useState<{ x: number; y: number } | null>(null)
   const [overlayErr, setOverlayErr] = useState<string | null>(null)
@@ -674,6 +684,7 @@ export default function SitingPanel() {
           'natgas_pipelines',
           'fiber_pops',
           'data_centers',
+          'announced_builds',
           // active state's parcel layer is added below by key prefix
         ])
         for (const l of r.layers) {
@@ -994,6 +1005,11 @@ export default function SitingPanel() {
       if (meta.operator_colors) setDcOperatorColors(meta.operator_colors as Record<string, string>)
       if (meta.cache_age_hours != null) setDcCacheAgeHours(Number(meta.cache_age_hours))
     }
+    if (key === 'announced_builds') {
+      const meta = (data as any)?._meta ?? {}
+      if (meta.power_source_colors) setAbColors(meta.power_source_colors as Record<string, string>)
+      if (meta.power_source_labels) setAbLabels(meta.power_source_labels as Record<string, string>)
+    }
     const SRC = `ovl-${key}-src`
     const LYR = `ovl-${key}-lyr`
     const LYR_FILL = `ovl-${key}-fill`
@@ -1028,33 +1044,38 @@ export default function SitingPanel() {
         }, beforeId)
       } else if (lyr.geom === 'point') {
         const isOperator = lyr.style === 'operator' || key === 'data_centers'
+        const isPowerSource = lyr.style === 'power_source' || key === 'announced_builds'
         map.addLayer({
           id: LYR, type: 'circle', source: SRC,
           paint: {
             'circle-radius': isOperator
               ? ['interpolate', ['linear'], ['zoom'], 4, 4, 8, 7, 12, 10]
-              : ['interpolate', ['linear'], ['zoom'], 4, 2.5, 10, 5],
+              : isPowerSource
+                ? ['interpolate', ['linear'], ['zoom'], 3, 6, 8, 10, 12, 14]
+                : ['interpolate', ['linear'], ['zoom'], 4, 2.5, 10, 5],
             'circle-color': isOperator
               ? ['coalesce', ['get', 'operator_color'], lyr.color]
-              : lyr.color,
-            'circle-stroke-color': isOperator ? '#ffffff' : '#000',
-            'circle-stroke-width': isOperator ? 1.4 : 0.6,
+              : isPowerSource
+                ? ['coalesce', ['get', 'power_source_color'], lyr.color]
+                : lyr.color,
+            'circle-stroke-color': (isOperator || isPowerSource) ? '#ffffff' : '#000',
+            'circle-stroke-width': isOperator ? 1.4 : isPowerSource ? 2.0 : 0.6,
             'circle-opacity': 0.95,
           },
         }, beforeId)
-        if (isOperator) {
-          // Click → details popup (reuses parcel popup chrome with a
-          // data-center-shaped payload). Cursor change + handler tracked so
-          // toggling the layer off cleans up correctly.
+        if (isOperator || isPowerSource) {
+          // Click → details popup. Cursor change + handler tracked so toggling
+          // the layer off cleans up correctly.
           const onEnter = () => { map.getCanvas().style.cursor = 'pointer' }
           const onLeave = () => { map.getCanvas().style.cursor = '' }
           const onClick = (e: any) => {
             const f = e.features?.[0]
             if (!f) return
+            const flagKey = isPowerSource ? '__announced_build__' : '__datacenter__'
             setParcelPopup({
               lat: e.lngLat.lat,
               lon: e.lngLat.lng,
-              props: { __datacenter__: true, ...(f.properties as Record<string, unknown>) },
+              props: { [flagKey]: true, ...(f.properties as Record<string, unknown>) },
             })
           }
           map.on('mouseenter', LYR, onEnter)
@@ -1407,11 +1428,12 @@ export default function SitingPanel() {
   // Auto 3D policy: ON at z >= 13, OFF below. This keeps terrain/buildings
   // in sync with zoom without requiring manual toggles. Skipped once the
   // user has explicitly used the 3D toggle — their preference is sticky for
-  // the rest of the session.
+  // the rest of the session. Also skipped in deep dive (typed buildings active).
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
     if (userTerrainOverrideRef.current) return
+    if (deepDive) return
     const shouldBeOn = zoom >= 13
     if (shouldBeOn === terrainOn) return
     if (shouldBeOn) {
@@ -1425,7 +1447,7 @@ export default function SitingPanel() {
       setTerrainOn(false)
       syncParcelOutlinesWith3D(false)
     }
-  }, [zoom, mapReady, terrainOn, syncParcelOutlinesWith3D])
+  }, [zoom, mapReady, terrainOn, deepDive, syncParcelOutlinesWith3D])
 
   // Deep-dive drawer open: force the map's site panel to expanded mode so
   // users can compare both detail surfaces side-by-side.
@@ -1538,6 +1560,43 @@ export default function SitingPanel() {
       curve: 1.6,
       essential: true,
     })
+  }
+
+  function enterDeepDive(site: SiteResultDTO) {
+    const map = mapRef.current
+    deepDiveSiteRef.current = site
+    setDeepDive(true)
+    setSelectedId(site.site_id)
+    userTerrainOverrideRef.current = true
+    if (map) {
+      // Switch to typed buildings (colored by land use) for the deep dive.
+      disable3DBuildings(map)
+      enableTerrain(map, 1.6)
+      enable3DBuildingsTyped(map)
+      setTerrainOn(true)
+      syncParcelOutlinesWith3D(true)
+      map.flyTo({
+        center: [site.lon, site.lat],
+        zoom: 15.5,
+        pitch: 65,
+        bearing: -28,
+        speed: 0.9,
+        curve: 1.8,
+        essential: true,
+      })
+    }
+  }
+
+  function exitDeepDive() {
+    const map = mapRef.current
+    setDeepDive(false)
+    deepDiveSiteRef.current = null
+    if (map) {
+      // Revert to standard (single-color) buildings, ease back to overhead.
+      disable3DBuildingsTyped(map)
+      enable3DBuildings(map)
+      map.easeTo({ pitch: 0, bearing: 0, duration: 800 })
+    }
   }
 
   function openStreetViewAt(lat: number, lon: number) {
@@ -1682,7 +1741,7 @@ export default function SitingPanel() {
   }
 
   return (
-    <div className="siting-root">
+    <div className={`siting-root${deepDive ? ' deep-dive' : ''}`}>
       {/* ── Sidebar ── */}
       <aside className="siting-side">
         <section className="siting-block">
@@ -2114,6 +2173,31 @@ export default function SitingPanel() {
               {activeLegendLayers.map((l) => {
               const voltageStyle = l.key === 'transmission'
               const isDataCenters = l.key === 'data_centers'
+              const isAnnouncedBuilds = l.key === 'announced_builds'
+              if (isAnnouncedBuilds) {
+                const entries = Object.entries(abColors)
+                return (
+                  <div className="map-legend-voltage" key={l.key}>
+                    <div className="map-legend-row">
+                      <span
+                        className="map-legend-swatch"
+                        style={{
+                          background:
+                            'linear-gradient(90deg, #f97316, #22c55e, #eab308, #60a5fa)',
+                        }}
+                      />
+                      <span className="map-legend-name">Announced AI builds · power strategy</span>
+                    </div>
+                    <div className="map-legend-voltage-head">POWER SOURCE</div>
+                    {entries.map(([ps, color]) => (
+                      <div className="map-legend-voltage-row" key={ps}>
+                        <span className="map-legend-voltage-swatch" style={{ background: color }} />
+                        <span className="map-legend-name">{abLabels[ps] ?? ps}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
               if (isDataCenters) {
                 const ops = Object.entries(dcOperatorCounts)
                   .sort((a, b) => b[1] - a[1])
@@ -2193,7 +2277,7 @@ export default function SitingPanel() {
         {parcelPopup && (
           <div className={`parcel-popup ${selected ? 'with-site-panel' : ''} ${detailOpen ? 'with-detail-open' : ''}`}>
             <div className="parcel-popup-head">
-              <span>{(parcelPopup.props as any).__datacenter__ ? 'DATA CENTER' : 'PARCEL'}</span>
+              <span>{(parcelPopup.props as any).__announced_build__ ? 'ANNOUNCED BUILD' : (parcelPopup.props as any).__datacenter__ ? 'DATA CENTER' : 'PARCEL'}</span>
               <button className="link-btn" onClick={() => {
                 parcelAbortRef.current?.abort()
                 parcelAbortRef.current = null
@@ -2203,6 +2287,65 @@ export default function SitingPanel() {
             <div className="parcel-popup-body">
               {(() => {
                 const pAny = parcelPopup.props as Record<string, unknown>
+                if ((pAny as any).__announced_build__) {
+                  const abName = String(pAny.name ?? '')
+                  const abOp = String(pAny.operator ?? '')
+                  const abPsLabel = String(pAny.power_source_label ?? pAny.power_source ?? '')
+                  const abPsColor = String(pAny.power_source_color ?? '#9ca3af')
+                  const abCapLabel = String(pAny.capacity_label ?? '')
+                  const abPsDesc = String(pAny.power_desc ?? '')
+                  const abStatus = String(pAny.status ?? '')
+                  const abState = String(pAny.state ?? '')
+                  return (
+                    <>
+                      <div className="parcel-popup-row">
+                        <span className="parcel-popup-key">power strategy</span>
+                        <span className="parcel-popup-val">
+                          <span style={{
+                            display: 'inline-block', width: 10, height: 10, borderRadius: 2,
+                            background: abPsColor, marginRight: 6, verticalAlign: 'middle',
+                            border: '1px solid rgba(255,255,255,0.3)',
+                          }} />
+                          {abPsLabel}
+                        </span>
+                      </div>
+                      {abName && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">site</span>
+                          <span className="parcel-popup-val">{abName}</span>
+                        </div>
+                      )}
+                      {abOp && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">operator</span>
+                          <span className="parcel-popup-val">{abOp}</span>
+                        </div>
+                      )}
+                      {abCapLabel && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">capacity</span>
+                          <span className="parcel-popup-val">{abCapLabel}</span>
+                        </div>
+                      )}
+                      {abStatus && (
+                        <div className="parcel-popup-row">
+                          <span className="parcel-popup-key">status</span>
+                          <span className="parcel-popup-val">{abStatus}</span>
+                        </div>
+                      )}
+                      {abPsDesc && (
+                        <div className="parcel-popup-row" style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <span className="parcel-popup-key">power detail</span>
+                          <span className="parcel-popup-val" style={{ whiteSpace: 'normal', lineHeight: 1.4 }}>{abPsDesc}</span>
+                        </div>
+                      )}
+                      <div className="parcel-popup-row">
+                        <span className="parcel-popup-key">coords</span>
+                        <span className="parcel-popup-val">{parcelPopup.lat.toFixed(4)}°, {parcelPopup.lon.toFixed(4)}° {abState}</span>
+                      </div>
+                    </>
+                  )
+                }
                 if ((pAny as any).__datacenter__) {
                   const dcName = String(pAny.name ?? '')
                   const dcOp = String(pAny.operator ?? '')
@@ -2424,7 +2567,16 @@ export default function SitingPanel() {
         )}
       </div>
 
-      {/* ── Right rail: ranked list ── */}
+      {/* ── Right rail: deep dive intel panel OR ranked list ── */}
+      {deepDive && selected ? (
+        <aside className="siting-rank" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <SiteIntelPanel
+            site={selected}
+            onExit={exitDeepDive}
+            onOpenDetail={() => { setDetailSite(selected); setDetailOpen(true) }}
+          />
+        </aside>
+      ) : (
       <aside className="siting-rank">
         {/* Header */}
         <Box
@@ -2664,8 +2816,14 @@ export default function SitingPanel() {
           </Typography>
         </Box>
       </aside>
+      )}
 
-      <SiteDetailsModal site={detailSite} open={detailOpen} onClose={() => setDetailOpen(false)} />
+      <SiteDetailsModal
+        site={detailSite}
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        onDeepDive={enterDeepDive}
+      />
     </div>
   )
 }

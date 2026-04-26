@@ -815,7 +815,11 @@ export default function SitingPanel() {
     const byState = layers.find(
       (l) => l.key.endsWith('_parcels') && (l.state ?? '').toUpperCase() === activeState,
     )
-    return byState?.key ?? null
+    if (byState) return byState.key
+    if (activeState !== 'CONUS') {
+      return layers.find((l) => l.key === 'fallback_parcels')?.key ?? null
+    }
+    return null
   }, [layers, activeState])
 
   const refreshCoverage = useCallback(async (state: string) => {
@@ -929,11 +933,15 @@ export default function SitingPanel() {
           'announced_builds',
           // active state's parcel layer is added below by key prefix
         ])
+        const startupParcelKey =
+          r.layers.find((l) => l.key === `${activeState.toLowerCase()}_parcels`)?.key
+          ?? r.layers.find((l) => l.key.endsWith('_parcels') && (l.state ?? '').toUpperCase() === activeState)?.key
+          ?? (activeState !== 'CONUS' ? r.layers.find((l) => l.key === 'fallback_parcels')?.key : null)
         for (const l of r.layers) {
           if (l.key === 'transmission_duke') {
             // merged into transmission for a single combined toggle
             next[l.key] = false
-          } else if (l.key === `${activeState.toLowerCase()}_parcels`) {
+          } else if (l.key === startupParcelKey) {
             // Active state's parcel layer defaults OFF at startup (2D).
             // It is auto-enabled when entering 3D mode.
             next[l.key] = false
@@ -1282,6 +1290,32 @@ export default function SitingPanel() {
       lyr.key === 'fiber_lines' ? fiberLimit :
       lyr.key === 'county_subdivisions' ? 2500 :
       50000
+    if (lyr.style === 'tile_raster' && lyr.tile_url) {
+      const SRC = `ovl-${key}-src`
+      const LYR = `ovl-${key}-lyr`
+      if (!map.getSource(SRC)) {
+        map.addSource(SRC, {
+          type: 'raster',
+          tiles: [lyr.tile_url],
+          tileSize: 256,
+        })
+      }
+      if (!map.getLayer(LYR)) {
+        const beforeId = map.getLayer('sites-halo') ? 'sites-halo' : undefined
+        map.addLayer({
+          id: LYR,
+          type: 'raster',
+          source: SRC,
+          minzoom: lyr.min_zoom,
+          paint: {
+            'raster-opacity': 0.92,
+            'raster-fade-duration': 0,
+          },
+        }, beforeId)
+      }
+      setLayerStatus(s => ({ ...s, [key]: 'ok' }))
+      return
+    }
     let data: any
     try {
       if (key === 'transmission') {
@@ -1614,7 +1648,7 @@ export default function SitingPanel() {
     setParcelPopup(null)
     // Drop any parcel layer from a different state — only the active state's
     // parcel overlay should be loaded at any given time.
-    const activeParcelKey = activeParcelLayerKey ?? `${activeState.toLowerCase()}_parcels`
+    const activeParcelKey = activeParcelLayerKey
     setEnabledLayers(prev => {
       const next = { ...prev }
       let changed = false
@@ -1627,7 +1661,7 @@ export default function SitingPanel() {
       }
       // Parcel outlines are mode-coupled: OFF in 2D, ON in 3D.
       const desiredParcelOn = terrainOn
-      if (activeParcelKey in next && next[activeParcelKey] !== desiredParcelOn) {
+      if (activeParcelKey && activeParcelKey in next && next[activeParcelKey] !== desiredParcelOn) {
         next[activeParcelKey] = desiredParcelOn
         if (!desiredParcelOn) removeOverlay(activeParcelKey)
         changed = true
@@ -1724,7 +1758,7 @@ export default function SitingPanel() {
   )
 
   const syncParcelOutlinesWith3D = useCallback((threeDOn: boolean) => {
-    const activeParcelKey = activeParcelLayerKey ?? `${activeState.toLowerCase()}_parcels`
+    const activeParcelKey = activeParcelLayerKey
     setEnabledLayers(prev => {
       const next = { ...prev }
       let changed = false

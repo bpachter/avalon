@@ -583,6 +583,26 @@ LIVE_LAYER_REGISTRY: dict[str, dict] = {
         "parallel_pages": True,
         "state": "KY",
     },
+    "nj_parcels": {
+        "name": "Parcel outlines (NJ)", "group": "Boundaries",
+        "url": "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#fff04a", "min_zoom": 12,
+        "source": "NJOGIS statewide parcels", "max_records": 4000, "page_size": 1000,
+        "simplify_min_offset": 0.00008, "geometry_precision": 6,
+        "parallel_pages": True,
+        "state": "NJ",
+    },
+    "fallback_parcels": {
+        "name": "Parcel outlines (national fallback)", "group": "Boundaries",
+        # Tiles-only parcel fallback for states without a queryable public
+        # FeatureServer. The client renders this directly as a raster tile layer.
+        "url": "https://tiles.arcgis.com/tiles/KzeiCaQsMoeCfoCq/arcgis/rest/services/Regrid_Nationwide_Parcel_Boundaries_v1/MapServer",
+        "tile_url": "https://tiles.arcgis.com/tiles/KzeiCaQsMoeCfoCq/arcgis/rest/services/Regrid_Nationwide_Parcel_Boundaries_v1/MapServer/tile/{z}/{y}/{x}",
+        "where": "1=1", "out_fields": "*",
+        "geom": "polygon", "color": "#fff04a", "style": "tile_raster", "min_zoom": 12,
+        "source": "Regrid nationwide parcel boundaries (tiles)", "max_records": 0, "page_size": 0,
+    },
 }
 
 # State → parcel layer key. Used by frontend to swap the active parcel
@@ -595,6 +615,7 @@ STATE_PARCEL_LAYER: dict[str, str] = {
     "IN": "in_parcels",
     "OH": "oh_parcels",
     "KY": "ky_parcels",
+    "NJ": "nj_parcels",
 }
 
 US_STATE_BBOX: dict[str, tuple[float, float, float, float]] = {
@@ -2240,7 +2261,7 @@ def siting_live_layers():
     return {"layers": [
         {"key": k, "name": c["name"], "group": c["group"], "geom": c["geom"],
          "color": c["color"], "style": c.get("style"), "min_zoom": c["min_zoom"],
-         "source": c["source"], "state": c.get("state")}
+         "source": c["source"], "state": c.get("state"), "tile_url": c.get("tile_url")}
         for k, c in LIVE_LAYER_REGISTRY.items()
     ]}
 
@@ -3077,9 +3098,10 @@ def siting_parcel_attrs(lat: float, lon: float, state: str | None = None):
 
     result: dict = {"lat": lat, "lon": lon, "sources": []}
 
-    # 1) Parcel attributes — pick the right layer for the active state, or
-    # fall back to NC for backward compatibility.
-    parcel_key = STATE_PARCEL_LAYER.get((state or "").upper().strip(), "nc_parcels")
+    # 1) Parcel attributes — only use a queryable state parcel feed when one
+    # actually exists. Unsupported states should return partial enrichment
+    # rather than silently querying NC parcels.
+    parcel_key = STATE_PARCEL_LAYER.get((state or "").upper().strip())
     parcel_cfg = LIVE_LAYER_REGISTRY.get(parcel_key)
     if parcel_cfg:
         from urllib.parse import urlencode

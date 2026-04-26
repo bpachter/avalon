@@ -79,6 +79,7 @@ export interface LiveLayer {
   min_zoom: number
   source: string
   state?: string | null
+  tile_url?: string | null
 }
 
 export interface StateOption {

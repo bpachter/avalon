@@ -23,6 +23,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import { avalonPalette } from '../theme'
 import SiteDetailsModal from './SiteDetailsModal'
 import SiteIntelPanel from './SiteIntelPanel'
+import SiteCompareModal from './SiteCompareModal'
 import {
   parseKmzOrKml,
   bboxOfFC,
@@ -235,6 +236,54 @@ function colorForScore(score: number, killed: boolean): string {
 }
 
 const ARCHETYPES: Archetype[] = ['training', 'inference', 'mixed']
+
+// Maps factor keys to short human-readable phrases used in the "why this
+// site" rule-based summary on each ranked card. Falls back to a slug
+// translation if a key isn't listed here.
+const FACTOR_PHRASES: Record<string, { strong: string; weak: string }> = {
+  power_cost:         { strong: 'cheap power',          weak: 'expensive power' },
+  power_carbon:       { strong: 'low-carbon grid',      weak: 'carbon-heavy grid' },
+  power_transmission: { strong: 'transmission access',  weak: 'thin transmission' },
+  fiber:              { strong: 'dense fiber',          weak: 'sparse fiber' },
+  latency:            { strong: 'low latency',          weak: 'high latency' },
+  water:              { strong: 'water available',      weak: 'tight water' },
+  climate:            { strong: 'cool climate',         weak: 'hot climate' },
+  hazard:             { strong: 'low hazard',           weak: 'hazard-prone' },
+  labor:              { strong: 'tech labor pool',      weak: 'thin labor pool' },
+  permitting:         { strong: 'fast permitting',      weak: 'slow permitting' },
+  tax_incentives:     { strong: 'incentive-eligible',   weak: 'few incentives' },
+  community:          { strong: 'community-friendly',   weak: 'opposition risk' },
+  land_zoning:        { strong: 'zoning fit',           weak: 'zoning issues' },
+  gas_pipeline:       { strong: 'gas access',           weak: 'no gas access' },
+}
+
+function phraseForFactor(name: string, normalized: number): string {
+  const p = FACTOR_PHRASES[name]
+  const slug = name.replace(/_/g, ' ')
+  if (!p) return normalized > 0.6 ? `strong ${slug}` : `weak ${slug}`
+  return normalized > 0.6 ? p.strong : p.weak
+}
+
+// Produces a short, human-readable rationale for a site by picking the
+// top-weighted real (non-stub, non-killed) factors. Returns "" when no
+// usable factors are present so the card can render the kill chips
+// instead.
+function summarizeSite(s: SiteResultDTO): string {
+  const killed = Object.values(s.kill_flags).some(Boolean)
+  if (killed) return ''
+  const factors = Object.entries(s.factors ?? {})
+    .filter(([, f]) => !f.killed && !f.stub && Number.isFinite(f.weighted))
+    .sort(([, a], [, b]) => (b.weighted ?? 0) - (a.weighted ?? 0))
+  if (factors.length === 0) return ''
+  const phrases: string[] = []
+  for (const [name, f] of factors) {
+    const phrase = phraseForFactor(name, f.normalized ?? 0)
+    if (!phrases.includes(phrase)) phrases.push(phrase)
+    if (phrases.length >= 2) break
+  }
+  if (phrases.length === 0) return ''
+  return phrases.map((p) => p[0].toUpperCase() + p.slice(1)).join(' · ')
+}
 
 // Strip per-state suffixes like " (NC)" / " (SC \u2013 York)" / " (KY \u2013 Jefferson)"
 // from layer display names \u2014 we now expose multiple states and the active
@@ -449,10 +498,17 @@ export default function SitingPanel() {
   const mapDivRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MLMap | null>(null)
   const sitesHandlersRef = useRef<Array<{
-    type: 'click' | 'mouseenter' | 'mouseleave'
+    type: 'click' | 'mouseenter' | 'mouseleave' | 'mousemove'
     layerId: string
     fn: (e: any) => void
   }> | null>(null)
+  // Floating hover-popup for site markers (instant tooltip showing
+  // site_id, composite, and top factors). Separate from parcelPopup which
+  // is a React-rendered card for parcel polygons.
+  const hoverPopupRef = useRef<maplibregl.Popup | null>(null)
+  // Custom DOM marker that pulses on the #1 ranked site so it's visually
+  // unmissable. Re-anchored whenever the top site changes.
+  const topSiteMarkerRef = useRef<maplibregl.Marker | null>(null)
   // Tracks per-overlay event-listener fns so we can remove them when the
   // overlay is toggled off (otherwise toggling repeatedly leaks N listeners
   // and a single click would fire N popups).
@@ -505,6 +561,13 @@ export default function SitingPanel() {
   const [detailSite, setDetailSite] = useState<SiteResultDTO | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [scoring, setScoring] = useState(false)
+  // Compare mode: when on, clicking a ranked card toggles its membership in
+  // a 2–4 site comparison set instead of entering deep dive. The compare
+  // modal opens once ≥2 sites are selected and the user clicks COMPARE.
+  const [compareMode, setCompareMode] = useState(false)
+  const [compareIds, setCompareIds] = useState<string[]>([])
+  const [compareOpen, setCompareOpen] = useState(false)
+  const COMPARE_MAX = 4
   const [layerStatus, setLayerStatus] = useState<Record<string, 'idle' | 'loading' | 'ok' | 'missing' | 'error'>>({})
   const [error, setError] = useState<string | null>(null)
 
@@ -955,6 +1018,10 @@ export default function SitingPanel() {
       detachStateInteractHandlers(map)
       drawCtrlRef.current?.destroy()
       drawCtrlRef.current = null
+      try { hoverPopupRef.current?.remove() } catch { /* ignore */ }
+      hoverPopupRef.current = null
+      try { topSiteMarkerRef.current?.remove() } catch { /* ignore */ }
+      topSiteMarkerRef.current = null
       map.remove()
       mapRef.current = null
     }
@@ -1042,17 +1109,80 @@ export default function SitingPanel() {
           if (f) setSelectedId(String(f.properties?.site_id))
         }
         const onEnter = () => { map.getCanvas().style.cursor = 'pointer' }
-        const onLeave = () => { map.getCanvas().style.cursor = '' }
+        const onLeave = () => {
+          map.getCanvas().style.cursor = ''
+          if (hoverPopupRef.current) {
+            try { hoverPopupRef.current.remove() } catch { /* ignore */ }
+          }
+        }
+        const onMove = (e: any) => {
+          const f = e.features?.[0]
+          if (!f) return
+          const sid = String(f.properties?.site_id ?? '')
+          const composite = Number(f.properties?.composite ?? 0)
+          const killed = String(f.properties?.killed) === 'true'
+          const color = String(f.properties?.color ?? '#0ea5e9')
+          const lngLat = e.lngLat
+          if (!hoverPopupRef.current) {
+            hoverPopupRef.current = new maplibregl.Popup({
+              closeButton: false,
+              closeOnClick: false,
+              offset: 14,
+              className: 'avalon-hover-popup',
+              maxWidth: '280px',
+            })
+          }
+          const html = `
+            <div class="avln-hp">
+              <div class="avln-hp-row">
+                <div class="avln-hp-id">${sid}</div>
+                <div class="avln-hp-score" style="color:${color}">${killed ? 'KO' : composite.toFixed(2)}</div>
+              </div>
+              <div class="avln-hp-hint">Click for deep dive</div>
+            </div>
+          `
+          hoverPopupRef.current.setLngLat(lngLat).setHTML(html).addTo(map)
+        }
         map.on('click', LYR, onClick)
         map.on('mouseenter', LYR, onEnter)
+        map.on('mousemove', LYR, onMove)
         map.on('mouseleave', LYR, onLeave)
         sitesHandlersRef.current = [
           { type: 'click', layerId: LYR, fn: onClick },
           { type: 'mouseenter', layerId: LYR, fn: onEnter },
+          { type: 'mousemove', layerId: LYR, fn: onMove },
           { type: 'mouseleave', layerId: LYR, fn: onLeave },
         ]
       }
     }
+  }, [sites, mapReady])
+
+  // ── #1 ranked site: pulsing DOM marker so the eye locks onto it ───────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    const ranked = [...sites].sort((a, b) => b.composite - a.composite)
+    const top = ranked.find(
+      (s) => isFiniteNumber(s.lat) && isFiniteNumber(s.lon)
+        && !Object.values(s.kill_flags).some(Boolean),
+    )
+    if (!top) {
+      topSiteMarkerRef.current?.remove()
+      topSiteMarkerRef.current = null
+      return
+    }
+    if (!topSiteMarkerRef.current) {
+      const el = document.createElement('div')
+      el.className = 'avln-top-pulse'
+      el.innerHTML = '<span class="avln-top-pulse-ring"></span><span class="avln-top-pulse-dot"></span>'
+      el.title = `Top-ranked: ${top.site_id}`
+      el.addEventListener('click', () => setSelectedId(top.site_id))
+      topSiteMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center' })
+    } else {
+      const el = topSiteMarkerRef.current.getElement() as HTMLElement
+      el.title = `Top-ranked: ${top.site_id}`
+    }
+    topSiteMarkerRef.current.setLngLat([top.lon, top.lat]).addTo(map)
   }, [sites, mapReady])
 
   // ── overlay layers: live ArcGIS proxy, bbox-clipped ───────────────────
@@ -2731,6 +2861,61 @@ export default function SitingPanel() {
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto' }}>
+            <Tooltip title={compareMode ? 'Click ranked sites to add (max 4) · then OPEN' : 'Compare 2–4 sites side-by-side on a radar chart'}>
+              <Button
+                size="small"
+                variant={compareMode ? 'contained' : 'text'}
+                onClick={() => {
+                  if (compareMode && compareIds.length >= 2) {
+                    setCompareOpen(true)
+                  } else {
+                    setCompareMode((m) => {
+                      const next = !m
+                      if (!next) setCompareIds([])
+                      return next
+                    })
+                  }
+                }}
+                sx={{
+                  fontFamily: '"Space Grotesk", sans-serif',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.1em',
+                  p: '4px 8px',
+                  minWidth: 0,
+                  color: compareMode ? '#0a1020' : avalonPalette.indigo,
+                  bgcolor: compareMode ? avalonPalette.indigo : 'transparent',
+                  '&:hover': {
+                    bgcolor: compareMode ? avalonPalette.indigo : 'rgba(129,140,248,0.10)',
+                  },
+                }}
+              >
+                {compareMode
+                  ? (compareIds.length >= 2 ? `OPEN (${compareIds.length})` : `PICK ${compareIds.length}/${COMPARE_MAX}`)
+                  : 'COMPARE'}
+              </Button>
+            </Tooltip>
+            {compareMode && (
+              <Tooltip title="Cancel compare">
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => { setCompareMode(false); setCompareIds([]) }}
+                  sx={{
+                    fontFamily: '"Space Grotesk", sans-serif',
+                    fontSize: 10,
+                    color: avalonPalette.rose,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    p: 0.5,
+                    minWidth: 0,
+                  }}
+                >
+                  ✕
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip title="Export as GeoJSON">
               <Button
                 size="small"
@@ -2826,10 +3011,19 @@ export default function SitingPanel() {
           component="ol"
           sx={{ listStyle: 'none', p: 0, m: 0, flex: 1, overflowY: 'auto' }}
         >
+          {scoring && displayedRanked.length === 0 && (
+            <Box sx={{ px: 1, py: 1 }}>
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="rank-skeleton" />
+              ))}
+            </Box>
+          )}
           {displayedRanked.map((s, i) => {
             const killed = Object.values(s.kill_flags).some(Boolean)
             const scoreColor = colorForScore(s.composite, killed)
             const isSelected = selectedId === s.site_id
+            const isCompared = compareIds.includes(s.site_id)
+            const summary = summarizeSite(s)
             const topFactors = killed
               ? []
               : Object.entries(s.factors ?? {})
@@ -2840,7 +3034,17 @@ export default function SitingPanel() {
               <Box
                 component="li"
                 key={s.site_id}
-                onClick={() => enterDeepDive(s)}
+                onClick={() => {
+                  if (compareMode) {
+                    setCompareIds((prev) => {
+                      if (prev.includes(s.site_id)) return prev.filter((x) => x !== s.site_id)
+                      if (prev.length >= COMPARE_MAX) return prev
+                      return [...prev, s.site_id]
+                    })
+                  } else {
+                    enterDeepDive(s)
+                  }
+                }}
                 sx={{
                   mx: 1,
                   my: 0.5,
@@ -2852,16 +3056,26 @@ export default function SitingPanel() {
                   cursor: 'pointer',
                   borderRadius: '12px',
                   border: '1px solid',
-                  borderColor: isSelected ? avalonPalette.signal : avalonPalette.border,
-                  bgcolor: isSelected ? 'rgba(14,165,233,0.08)' : avalonPalette.bgInput,
-                  boxShadow: isSelected
-                    ? `0 0 0 1px ${avalonPalette.signal}, 0 4px 16px rgba(14,165,233,0.15)`
-                    : 'none',
+                  borderColor: isCompared
+                    ? avalonPalette.amber
+                    : isSelected ? avalonPalette.signal : avalonPalette.border,
+                  bgcolor: isCompared
+                    ? 'rgba(245,158,11,0.08)'
+                    : isSelected ? 'rgba(14,165,233,0.08)' : avalonPalette.bgInput,
+                  boxShadow: isCompared
+                    ? `0 0 0 1px ${avalonPalette.amber}, 0 4px 16px rgba(245,158,11,0.15)`
+                    : isSelected
+                      ? `0 0 0 1px ${avalonPalette.signal}, 0 4px 16px rgba(14,165,233,0.15)`
+                      : 'none',
                   transition: 'all 0.15s ease',
                   touchAction: 'manipulation',
                   '&:hover': {
-                    borderColor: isSelected ? avalonPalette.signal : avalonPalette.borderSoft,
-                    bgcolor: isSelected ? 'rgba(14,165,233,0.10)' : 'rgba(14,165,233,0.04)',
+                    borderColor: isCompared
+                      ? avalonPalette.amber
+                      : isSelected ? avalonPalette.signal : avalonPalette.borderSoft,
+                    bgcolor: isCompared
+                      ? 'rgba(245,158,11,0.10)'
+                      : isSelected ? 'rgba(14,165,233,0.10)' : 'rgba(14,165,233,0.04)',
                   },
                 }}
               >
@@ -2946,6 +3160,22 @@ export default function SitingPanel() {
                     })}
                   </Box>
                 )}
+                {/* Row 4: rule-based one-liner ("Why this site") */}
+                {!killed && summary && (
+                  <Typography sx={{
+                    fontFamily: '"Space Grotesk", sans-serif',
+                    fontSize: 10,
+                    color: avalonPalette.whiteDim,
+                    letterSpacing: '0.02em',
+                    fontStyle: 'italic',
+                    mt: 0.25,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {summary}
+                  </Typography>
+                )}
                 {killed && (
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                     {Object.entries(s.kill_flags).filter(([, v]) => v).map(([k]) => (
@@ -2984,6 +3214,13 @@ export default function SitingPanel() {
         site={detailSite}
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
+      />
+      <SiteCompareModal
+        open={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        sites={compareIds
+          .map((id) => sites.find((s) => s.site_id === id))
+          .filter((s): s is SiteResultDTO => Boolean(s))}
       />
     </div>
   )

@@ -893,6 +893,90 @@
 }
 
 /* ============================================================
+   Site marker hover popup + #1 pulsing marker (2026-04-26)
+   ============================================================ */
+.maplibregl-popup.avalon-hover-popup .maplibregl-popup-content {
+  background: rgba(8, 14, 26, 0.92);
+  border: 1px solid rgba(14, 165, 233, 0.45);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(14,165,233,0.12);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-family: "Space Grotesk", sans-serif;
+  color: var(--text-primary, #e2e8f0);
+  pointer-events: none;
+}
+.maplibregl-popup.avalon-hover-popup .maplibregl-popup-tip {
+  display: none;
+}
+.avln-hp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 140px;
+}
+.avln-hp-id {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #f8fafc;
+  flex: 1;
+}
+.avln-hp-score {
+  font-family: "Rajdhani", "Space Grotesk", sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1;
+}
+.avln-hp-hint {
+  margin-top: 4px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.75);
+}
+
+/* #1 site pulse marker — sits on top of the regular point so it visually
+   "wins" the eye even on dense maps. */
+.avln-top-pulse {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.avln-top-pulse-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.9), 0 0 0 2px #050810;
+}
+.avln-top-pulse-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  border: 2px solid rgba(16, 185, 129, 0.85);
+  animation: avln-top-pulse 1.6s ease-out infinite;
+}
+@keyframes avln-top-pulse {
+  0%   { transform: scale(0.45); opacity: 0.95; }
+  80%  { transform: scale(1.7);  opacity: 0;    }
+  100% { transform: scale(1.7);  opacity: 0;    }
+}
+
+/* ============================================================
    Avalon UI Overhaul — MUI-first visual refresh (2026-04-24)
    ============================================================ */
 

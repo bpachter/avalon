@@ -598,6 +598,7 @@ STATE_PARCEL_LAYER: dict[str, str] = {
 }
 
 US_STATE_BBOX: dict[str, tuple[float, float, float, float]] = {
+    # Duke + East/Sunbelt service area
     "NC": (-84.32, 33.84, -75.46, 36.59),
     "SC": (-83.35, 32.03, -78.54, 35.22),
     "FL": (-87.63, 24.40, -80.03, 31.00),
@@ -608,6 +609,23 @@ US_STATE_BBOX: dict[str, tuple[float, float, float, float]] = {
     "VA": (-83.68, 36.54, -75.24, 39.47),
     "TN": (-90.31, 34.98, -81.65, 36.68),
     "TX": (-106.65, 25.84, -93.51, 36.50),
+    # Sunbelt fill (Texas → Florida)
+    "OK": (-103.00, 33.62, -94.43, 37.00),
+    "AR": (-94.62, 33.00, -89.64, 36.50),
+    "LA": (-94.04, 28.93, -88.82, 33.02),
+    "MS": (-91.66, 30.17, -88.10, 35.01),
+    "AL": (-88.47, 30.21, -84.89, 35.01),
+    "NM": (-109.05, 31.33, -103.00, 37.00),
+    "AZ": (-114.82, 31.33, -109.05, 37.00),
+    # East-coast continuation (VA → New York)
+    "WV": (-82.65, 37.20, -77.72, 40.64),
+    "MD": (-79.49, 37.91, -75.05, 39.72),
+    "DE": (-75.79, 38.45, -74.98, 39.84),
+    "NJ": (-75.56, 38.93, -73.89, 41.36),
+    "PA": (-80.52, 39.72, -74.69, 42.27),
+    "NY": (-79.76, 40.50, -71.86, 45.02),
+    # Helpful neighbors for border layers
+    "MO": (-95.77, 35.99, -89.10, 40.61),
     "CONUS": (-125.0, 24.5, -66.95, 49.5),
 }
 
@@ -626,12 +644,32 @@ STATE_BORDER_MAP: dict[str, list[str]] = {
     "VA": ["NC", "TN", "KY", "WV", "MD"],
     "TN": ["KY", "VA", "NC", "GA", "AL", "MS", "AR", "MO"],
     "TX": ["NM", "OK", "AR", "LA"],
+    "OK": ["TX", "NM", "AR", "MO", "KS"],
+    "AR": ["MO", "TN", "MS", "LA", "TX", "OK"],
+    "LA": ["TX", "AR", "MS"],
+    "MS": ["LA", "AR", "TN", "AL"],
+    "AL": ["MS", "TN", "GA", "FL"],
+    "NM": ["TX", "OK", "AZ", "CO"],
+    "AZ": ["NM", "CA", "NV", "UT"],
+    "WV": ["VA", "KY", "OH", "PA", "MD"],
+    "MD": ["VA", "WV", "PA", "DE"],
+    "DE": ["MD", "PA", "NJ"],
+    "NJ": ["NY", "PA", "DE"],
+    "PA": ["OH", "WV", "MD", "DE", "NJ", "NY"],
+    "NY": ["PA", "NJ", "VT", "MA", "CT"],
+    "MO": ["IA", "IL", "KY", "TN", "AR", "OK", "KS", "NE"],
 }
 
 _STATE_FULL_NAME: dict[str, str] = {
     "NC": "North Carolina", "SC": "South Carolina", "FL": "Florida",
     "IN": "Indiana", "OH": "Ohio", "KY": "Kentucky",
     "GA": "Georgia", "VA": "Virginia", "TN": "Tennessee", "TX": "Texas",
+    "OK": "Oklahoma", "AR": "Arkansas", "LA": "Louisiana",
+    "MS": "Mississippi", "AL": "Alabama",
+    "NM": "New Mexico", "AZ": "Arizona",
+    "WV": "West Virginia", "MD": "Maryland", "DE": "Delaware",
+    "NJ": "New Jersey", "PA": "Pennsylvania", "NY": "New York",
+    "MO": "Missouri",
 }
 
 COUNTY_MORATORIUMS: list[dict] = [

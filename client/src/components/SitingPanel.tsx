@@ -577,7 +577,7 @@ export default function SitingPanel() {
     type: 'FeatureCollection'
     features: Array<Record<string, unknown>>
   }>({ type: 'FeatureCollection', features: [] })
-  const [activeState, setActiveState] = useState<string>('NC')
+  const [activeState, setActiveState] = useState<string>('CONUS')
   const [basemap, setBasemap] = useState<BasemapKey>('hybrid')
   const [moratoriums, setMoratoriums] = useState<MoratoriumCounty[]>([])
   const moratoriumKeys = useMemo(() => {
@@ -684,8 +684,11 @@ export default function SitingPanel() {
           'fill-color': avalonPalette.signal,
           'fill-opacity': [
             'case',
+            // Active state: punch a hole so the basemap (satellite/streets)
+            // shows through with no signal-blue tint. Hover beats this only
+            // for non-active states.
+            ['==', ['get', 'state_code'], activeState], 0,
             ['boolean', ['feature-state', 'hover'], false], 0.22,
-            ['==', ['get', 'state_code'], activeState], 0.11,
             0.035,
           ] as any,
         },
@@ -737,8 +740,8 @@ export default function SitingPanel() {
     // Keep active-state style in sync without re-adding layers.
     map.setPaintProperty(STATE_INTERACT_FILL, 'fill-opacity', [
       'case',
+      ['==', ['get', 'state_code'], activeState], 0,
       ['boolean', ['feature-state', 'hover'], false], 0.22,
-      ['==', ['get', 'state_code'], activeState], 0.11,
       0.035,
     ] as any)
     map.setPaintProperty(STATE_INTERACT_EXTRUDE, 'fill-extrusion-height', [
@@ -970,9 +973,10 @@ export default function SitingPanel() {
     const map = new maplibregl.Map({
       container: mapDivRef.current,
       style: styleFor(basemap) as any,
-      // Center on North Carolina (initial scope per user)
-      center: [-79.2, 35.5],
-      zoom: 6.2,
+      // Default to a CONUS-wide view so users land on the whole country and
+      // can pick a state interactively (or via the selector).
+      center: [-96.5, 38.0],
+      zoom: 3.8,
       attributionControl: { compact: true },
     })
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')

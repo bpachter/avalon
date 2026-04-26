@@ -93,13 +93,13 @@ export function ensureOverlayLayers(map: MLMap): void {
     map.addLayer({
       id: IMPORT_FILL, type: 'fill', source: IMPORT_SRC,
       filter: ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]],
-      paint: { 'fill-color': '#00d9ff', 'fill-opacity': 0.18 },
+      paint: { 'fill-color': '#0ea5e9', 'fill-opacity': 0.18 },
     })
     map.addLayer({
       id: IMPORT_LINE, type: 'line', source: IMPORT_SRC,
       filter: ['in', ['geometry-type'], ['literal', ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']]],
       paint: {
-        'line-color': '#00d9ff',
+        'line-color': '#0ea5e9',
         'line-width': 2,
         'line-dasharray': [2, 2] as unknown as maplibregl.DataDrivenPropertyValueSpecification<number[]>,
       },
@@ -109,7 +109,7 @@ export function ensureOverlayLayers(map: MLMap): void {
       filter: ['==', ['geometry-type'], 'Point'],
       paint: {
         'circle-radius': 6,
-        'circle-color': '#00d9ff',
+        'circle-color': '#0ea5e9',
         'circle-stroke-color': '#0a0a0a',
         'circle-stroke-width': 1.4,
       },
@@ -461,12 +461,12 @@ export function disable3DBuildings(map: MLMap): void {
 export const BUILDINGS_TYPED_LYR = 'avalon-3d-buildings-typed'
 
 export const DEEP_DIVE_BUILDING_PALETTE: Record<string, { color: string; label: string }> = {
-  industrial:  { color: '#f97316', label: 'Industrial / Warehouse' },
-  residential: { color: '#94a3b8', label: 'Residential' },
-  commercial:  { color: '#22c55e', label: 'Commercial' },
-  office:      { color: '#60a5fa', label: 'Office / Gov.' },
-  civic:       { color: '#eab308', label: 'Public / Education' },
-  other:       { color: '#6b7280', label: 'Other' },
+  industrial:  { color: '#f59e0b', label: 'Industrial / Warehouse' },
+  residential: { color: '#64748b', label: 'Residential' },
+  commercial:  { color: '#10b981', label: 'Commercial' },
+  office:      { color: '#0ea5e9', label: 'Office / Gov.' },
+  civic:       { color: '#818cf8', label: 'Public / Education' },
+  other:       { color: '#334155', label: 'Other' },
 }
 
 export function enable3DBuildingsTyped(map: MLMap): void {

@@ -1,76 +1,86 @@
 import { createTheme, alpha } from '@mui/material/styles'
 
-// Avalon — ENKIDU palette ported into a Material UI theme.
-// Goals:
-//   - Keep the Blade-Runner / amber-on-near-black vibe of the existing CSS.
-//   - Give every MUI component the right defaults so we don't sprinkle `sx`
-//     overrides everywhere.
-//   - Keep the VT323 / Share Tech Mono mix the rest of the app uses.
+// Avalon — Signal Intelligence design system.
+//   Deep blue-black surfaces, sky-blue primary signal, emerald/amber/rose
+//   score gradient, violet for selection. Two fonts only:
+//     - Space Grotesk for UI labels and body text
+//     - JetBrains Mono for numeric data values
+//   Rajdhani is reserved for large composite-score numerals.
 
 const palette = {
-  bg:        '#0b0b0d',
-  bgPanel:   '#121216',
-  bgInput:   '#18181d',
-  border:    '#2a2a31',
-  borderSoft:'#34343d',
-  amber:     '#ff9500',
-  amberDim:  '#b36900',
-  cyan:      '#00e5ff',
-  cyanDim:   '#008a99',
-  green:     '#39d353',
-  red:       '#ff1a40',
-  indigo:    '#5f72ff',
-  paperLift: '#1a1a21',
-  whiteDim:  '#8899aa',
+  bg:          '#050810',
+  bgPanel:     '#0a1020',
+  bgInput:     '#0f172a',
+  border:      '#1e2a3d',
+  borderSoft:  '#2d4060',
+  signal:      '#0ea5e9',
+  signalDim:   '#0369a1',
+  emerald:     '#10b981',
+  amber:       '#f59e0b',
+  amberDim:    '#92400e',
+  rose:        '#f43f5e',
+  violet:      '#818cf8',
+  paperLift:   '#131f35',
+  whiteDim:    '#64748b',
+  textPrimary: '#e2e8f0',
+  textBright:  '#f8fafc',
+  // Backwards-compat aliases — many existing call sites still reference
+  // the old token names. Keep them mapped to the new values so we never
+  // ship a broken color.
+  cyan:        '#0ea5e9',
+  cyanDim:     '#0369a1',
+  green:       '#10b981',
+  red:         '#f43f5e',
+  indigo:      '#818cf8',
 }
 
 export const avalonTheme = createTheme({
   palette: {
     mode: 'dark',
-    primary:   { main: palette.amber, dark: palette.amberDim, contrastText: palette.bg },
-    secondary: { main: palette.cyan,  dark: palette.cyanDim,  contrastText: palette.bg },
-    success:   { main: palette.green },
-    error:     { main: palette.red   },
-    warning:   { main: palette.amber },
+    primary:   { main: palette.signal,  dark: palette.signalDim, contrastText: palette.bg },
+    secondary: { main: palette.violet,  dark: '#4338ca',         contrastText: palette.bg },
+    success:   { main: palette.emerald },
+    error:     { main: palette.rose    },
+    warning:   { main: palette.amber   },
     background:{ default: palette.bg, paper: palette.bgPanel },
-    info:      { main: palette.indigo },
-    text:      { primary: '#d7e2ff', secondary: palette.whiteDim, disabled: alpha(palette.whiteDim, 0.4) },
+    info:      { main: palette.violet  },
+    text:      { primary: palette.textPrimary, secondary: palette.whiteDim, disabled: alpha(palette.whiteDim, 0.4) },
     divider:   palette.border,
   },
   shape: { borderRadius: 12 },
   typography: {
-    fontFamily: '"Sora", "Share Tech Mono", monospace',
+    fontFamily: '"Space Grotesk", system-ui, sans-serif',
     fontSize: 13,
-    h1: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.14em', fontWeight: 600 },
-    h2: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.14em', fontWeight: 600 },
-    h3: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.14em', fontWeight: 600 },
-    h4: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.14em', fontWeight: 600 },
-    h5: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.14em', fontWeight: 600 },
-    h6: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.14em', fontWeight: 600 },
-    button: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.18em', fontSize: 13, fontWeight: 700 },
-    overline: { fontFamily: '"Rajdhani", "VT323", monospace', letterSpacing: '0.2em', fontSize: 11, fontWeight: 600 },
+    h1: { fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', letterSpacing: '0.06em', fontWeight: 700 },
+    h2: { fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', letterSpacing: '0.06em', fontWeight: 700 },
+    h3: { fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', letterSpacing: '0.06em', fontWeight: 700 },
+    h4: { fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', letterSpacing: '0.06em', fontWeight: 700 },
+    h5: { fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', letterSpacing: '0.06em', fontWeight: 700 },
+    h6: { fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', letterSpacing: '0.06em', fontWeight: 700 },
+    button:   { fontFamily: '"Space Grotesk", sans-serif', letterSpacing: '0.06em', fontSize: 13, fontWeight: 600 },
+    overline: { fontFamily: '"Space Grotesk", sans-serif', letterSpacing: '0.14em', fontSize: 11, fontWeight: 600 },
   },
   components: {
     MuiCssBaseline: {
       styleOverrides: {
         body: {
           background: palette.bg,
-          color: '#d7e2ff',
+          color: palette.textPrimary,
           WebkitFontSmoothing: 'antialiased',
           backgroundImage:
-            'radial-gradient(circle at 7% 14%, rgba(0,229,255,0.08) 0%, rgba(0,229,255,0) 32%), radial-gradient(circle at 92% 0%, rgba(255,149,0,0.13) 0%, rgba(255,149,0,0) 40%)',
+            'radial-gradient(circle at 7% 14%, rgba(14,165,233,0.06) 0%, transparent 32%), radial-gradient(circle at 92% 0%, rgba(129,140,248,0.08) 0%, transparent 40%)',
         },
-        // Custom scrollbar matching the ENKIDU look.
-        '*::-webkit-scrollbar': { width: 4, height: 4 },
+        '*::-webkit-scrollbar': { width: 6, height: 6 },
         '*::-webkit-scrollbar-track': { background: palette.bg },
-        '*::-webkit-scrollbar-thumb': { background: palette.amberDim },
+        '*::-webkit-scrollbar-thumb': { background: palette.border, borderRadius: 4 },
+        '*::-webkit-scrollbar-thumb:hover': { background: palette.signal },
       },
     },
     MuiAppBar: {
       defaultProps: { elevation: 0, color: 'transparent' },
       styleOverrides: {
         root: {
-          background: '#060810',
+          background: palette.bgPanel,
           borderBottom: `1px solid ${palette.border}`,
           backgroundImage: 'none',
         },
@@ -81,7 +91,7 @@ export const avalonTheme = createTheme({
       styleOverrides: {
         root: {
           background: `linear-gradient(180deg, ${palette.bgPanel} 0%, ${palette.paperLift} 100%)`,
-          border: `1px solid ${palette.borderSoft}`,
+          border: `1px solid ${palette.border}`,
           borderRadius: 14,
           backgroundImage: 'none',
         },
@@ -92,41 +102,43 @@ export const avalonTheme = createTheme({
       styleOverrides: {
         root: {
           minHeight: 32,
-          letterSpacing: '0.15em',
+          letterSpacing: '0.06em',
           textTransform: 'none',
-          borderRadius: 999,
+          borderRadius: 10,
           paddingInline: 14,
+          fontWeight: 600,
           '&.MuiButton-containedPrimary': {
-            color: palette.bg,
-            background: `linear-gradient(90deg, ${palette.amber} 0%, #ffb340 100%)`,
-            '&:hover': { boxShadow: `0 8px 20px ${alpha(palette.amber, 0.38)}` },
+            color: '#ffffff',
+            background: `linear-gradient(90deg, ${palette.signal} 0%, #38bdf8 100%)`,
+            '&:hover': { boxShadow: `0 0 20px ${alpha(palette.signal, 0.3)}` },
           },
         },
         outlined: {
-          borderColor: palette.borderSoft,
-          color: palette.whiteDim,
-          '&:hover': { borderColor: palette.cyan, color: palette.cyan, background: alpha(palette.cyan, 0.10) },
+          borderColor: palette.border,
+          color: palette.textPrimary,
+          '&:hover': { borderColor: palette.signal, color: palette.signal, background: alpha(palette.signal, 0.08) },
         },
       },
     },
     MuiToggleButton: {
       styleOverrides: {
         root: {
-          fontFamily: '"VT323", monospace',
-          fontSize: 14,
-          letterSpacing: '0.16em',
+          fontFamily: '"Space Grotesk", sans-serif',
+          fontSize: 12,
+          letterSpacing: '0.08em',
           textTransform: 'none',
           color: palette.whiteDim,
-          borderColor: palette.borderSoft,
+          borderColor: palette.border,
           borderRadius: 999,
           padding: '6px 12px',
-          '&:hover': { color: palette.cyan, borderColor: palette.cyanDim, background: alpha(palette.cyan, 0.05) },
+          fontWeight: 600,
+          '&:hover': { color: palette.signal, borderColor: palette.signalDim, background: alpha(palette.signal, 0.05) },
           '&.Mui-selected': {
-            color: palette.bg,
-            background: `linear-gradient(90deg, ${palette.amber} 0%, #ffb340 100%)`,
-            borderColor: palette.amber,
-            boxShadow: `0 8px 18px ${alpha(palette.amber, 0.32)}`,
-            '&:hover': { background: `linear-gradient(90deg, ${palette.amber} 0%, #ffb340 100%)` },
+            color: '#ffffff',
+            background: `linear-gradient(90deg, ${palette.signal} 0%, ${palette.violet} 100%)`,
+            borderColor: palette.signal,
+            boxShadow: `0 0 14px ${alpha(palette.signal, 0.4)}`,
+            '&:hover': { background: `linear-gradient(90deg, ${palette.signal} 0%, ${palette.violet} 100%)` },
           },
         },
       },
@@ -135,27 +147,27 @@ export const avalonTheme = createTheme({
       styleOverrides: {
         switchBase: {
           color: palette.whiteDim,
-          '&.Mui-checked': { color: palette.cyan },
-          '&.Mui-checked + .MuiSwitch-track': { background: palette.cyanDim, opacity: 0.9 },
+          '&.Mui-checked': { color: palette.signal },
+          '&.Mui-checked + .MuiSwitch-track': { background: palette.signalDim, opacity: 0.9 },
         },
-        track: { background: palette.borderSoft, opacity: 1, borderRadius: 999 },
+        track: { background: palette.border, opacity: 1, borderRadius: 999 },
       },
     },
     MuiSlider: {
       styleOverrides: {
         root: {
-          color: palette.amber,
+          color: palette.signal,
           height: 4,
           padding: '8px 0',
         },
         thumb: {
           width: 12, height: 12,
-          background: palette.amber,
-          boxShadow: `0 0 6px ${alpha(palette.amber, 0.7)}`,
-          '&:hover, &.Mui-focusVisible': { boxShadow: `0 0 0 6px ${alpha(palette.amber, 0.16)}` },
+          background: palette.signal,
+          boxShadow: `0 0 6px ${alpha(palette.signal, 0.7)}`,
+          '&:hover, &.Mui-focusVisible': { boxShadow: `0 0 0 6px ${alpha(palette.signal, 0.16)}` },
         },
         rail: { background: palette.border, opacity: 1 },
-        track: { background: palette.amber, border: 'none' },
+        track: { background: palette.signal, border: 'none' },
       },
     },
     MuiSelect: {
@@ -163,10 +175,10 @@ export const avalonTheme = createTheme({
       styleOverrides: {
         outlined: {
           background: palette.bgInput,
-          color: '#d7e2ff',
-          fontFamily: '"Share Tech Mono", monospace',
+          color: palette.textPrimary,
+          fontFamily: '"JetBrains Mono", monospace',
           fontSize: 12,
-          letterSpacing: '0.08em',
+          letterSpacing: '0.04em',
         },
       },
     },
@@ -175,9 +187,9 @@ export const avalonTheme = createTheme({
         root: {
           background: palette.bgInput,
           borderRadius: 10,
-          '& .MuiOutlinedInput-notchedOutline': { borderColor: palette.borderSoft },
-          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: palette.cyanDim },
-          '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: palette.cyan, borderWidth: 1 },
+          '& .MuiOutlinedInput-notchedOutline': { borderColor: palette.border },
+          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: palette.borderSoft },
+          '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: palette.signal, borderWidth: 1 },
         },
         input: { padding: '6px 10px' },
       },
@@ -186,7 +198,7 @@ export const avalonTheme = createTheme({
       styleOverrides: {
         paper: {
           background: `linear-gradient(180deg, ${palette.bgPanel} 0%, ${palette.paperLift} 100%)`,
-          border: `1px solid ${palette.borderSoft}`,
+          border: `1px solid ${palette.border}`,
           borderRadius: 12,
         },
       },
@@ -194,12 +206,12 @@ export const avalonTheme = createTheme({
     MuiMenuItem: {
       styleOverrides: {
         root: {
-          fontFamily: '"Share Tech Mono", monospace',
+          fontFamily: '"Space Grotesk", sans-serif',
           fontSize: 12,
-          letterSpacing: '0.08em',
-          color: palette.whiteDim,
-          '&.Mui-selected': { background: alpha(palette.amber, 0.17), color: palette.amber },
-          '&:hover': { background: alpha(palette.cyan, 0.08), color: palette.cyan },
+          letterSpacing: '0.04em',
+          color: palette.textPrimary,
+          '&.Mui-selected': { background: alpha(palette.signal, 0.18), color: palette.signal },
+          '&:hover': { background: alpha(palette.signal, 0.08), color: palette.signal },
         },
       },
     },
@@ -207,32 +219,33 @@ export const avalonTheme = createTheme({
       defaultProps: { size: 'small', variant: 'outlined' },
       styleOverrides: {
         root: {
-          fontFamily: '"Share Tech Mono", monospace',
+          fontFamily: '"Space Grotesk", sans-serif',
           fontSize: 10,
-          letterSpacing: '0.1em',
+          letterSpacing: '0.06em',
           height: 22,
           borderRadius: 999,
+          fontWeight: 600,
         },
-        outlined: { borderColor: palette.borderSoft, color: palette.whiteDim },
+        outlined: { borderColor: palette.border, color: palette.textPrimary },
       },
     },
     MuiTooltip: {
       styleOverrides: {
         tooltip: {
           background: `linear-gradient(180deg, ${palette.bgPanel} 0%, ${palette.paperLift} 100%)`,
-          border: `1px solid ${palette.borderSoft}`,
-          color: '#d7e2ff',
-          fontFamily: '"Share Tech Mono", monospace',
+          border: `1px solid ${palette.border}`,
+          color: palette.textPrimary,
+          fontFamily: '"Space Grotesk", sans-serif',
           fontSize: 11,
-          letterSpacing: '0.06em',
+          letterSpacing: '0.03em',
           borderRadius: 8,
         },
       },
     },
     MuiLinearProgress: {
       styleOverrides: {
-        root: { background: palette.borderSoft, height: 4, borderRadius: 99 },
-        bar: { background: palette.cyan },
+        root: { background: palette.border, height: 4, borderRadius: 99 },
+        bar: { background: palette.signal },
       },
     },
     MuiDivider: {
@@ -242,8 +255,8 @@ export const avalonTheme = createTheme({
       styleOverrides: {
         root: {
           padding: '4px 8px',
-          '&:hover': { background: alpha(palette.cyan, 0.05) },
-          '&.Mui-selected': { background: alpha(palette.amber, 0.10) },
+          '&:hover': { background: alpha(palette.signal, 0.06) },
+          '&.Mui-selected': { background: alpha(palette.signal, 0.12) },
         },
       },
     },

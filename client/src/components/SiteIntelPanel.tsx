@@ -10,7 +10,7 @@ import { DEEP_DIVE_BUILDING_PALETTE } from './SiteOverlays'
 // ── Shared text styles ──────────────────────────────────────────────────────
 
 const S_SECTION_HEAD = {
-  fontFamily: '"VT323", monospace',
+  fontFamily: '"Space Grotesk", sans-serif',
   fontSize: 10,
   letterSpacing: '0.22em',
   textTransform: 'uppercase' as const,
@@ -19,7 +19,7 @@ const S_SECTION_HEAD = {
 }
 
 const S_SUB_HEAD = {
-  fontFamily: '"VT323", monospace',
+  fontFamily: '"Space Grotesk", sans-serif',
   fontSize: 9,
   letterSpacing: '0.18em',
   textTransform: 'uppercase' as const,
@@ -28,7 +28,7 @@ const S_SUB_HEAD = {
 }
 
 const S_KEY: React.CSSProperties = {
-  fontFamily: '"Share Tech Mono", monospace',
+  fontFamily: '"JetBrains Mono", monospace',
   fontSize: 10,
   color: avalonPalette.whiteDim,
   minWidth: 128,
@@ -36,7 +36,7 @@ const S_KEY: React.CSSProperties = {
 }
 
 const S_VAL: React.CSSProperties = {
-  fontFamily: '"Share Tech Mono", monospace',
+  fontFamily: '"JetBrains Mono", monospace',
   fontSize: 10,
   color: '#d7e2ff',
   flex: 1,
@@ -79,15 +79,15 @@ function substationNote(subDistMi: number, subVoltKv: number | null): string {
 }
 
 function gasTurbineNote(distMi: number): { label: string; color: string } {
-  if (distMi <= 5)  return { label: 'Excellent — direct tap viable',           color: avalonPalette.green }
-  if (distMi <= 15) return { label: 'Good — spur line cost-effective',          color: avalonPalette.green }
+  if (distMi <= 5)  return { label: 'Excellent — direct tap viable',           color: avalonPalette.emerald }
+  if (distMi <= 15) return { label: 'Good — spur line cost-effective',          color: avalonPalette.emerald }
   if (distMi <= 30) return { label: 'Marginal — evaluate vs. grid alternatives', color: avalonPalette.amber }
-  return                   { label: 'Not viable for on-site gas generation',    color: avalonPalette.red   }
+  return                   { label: 'Not viable for on-site gas generation',    color: avalonPalette.rose   }
 }
 
 function solarPotential(lat: number): { label: string; detail: string; color: string } {
-  if (lat < 32) return { label: 'High',     color: avalonPalette.green,   detail: 'High DNI (>5.5 kWh/m²/day). Utility-scale PPA or on-site solar commercially attractive.' }
-  if (lat < 36) return { label: 'Good',     color: avalonPalette.green,   detail: 'Moderate-high irradiance. Solar PPA or on-site co-generation both viable.' }
+  if (lat < 32) return { label: 'High',     color: avalonPalette.emerald, detail: 'High DNI (>5.5 kWh/m²/day). Utility-scale PPA or on-site solar commercially attractive.' }
+  if (lat < 36) return { label: 'Good',     color: avalonPalette.emerald, detail: 'Moderate-high irradiance. Solar PPA or on-site co-generation both viable.' }
   if (lat < 40) return { label: 'Moderate', color: avalonPalette.amber,   detail: 'Moderate irradiance. Solar viable with strong long-term PPA contract.' }
   return               { label: 'Limited',  color: avalonPalette.whiteDim, detail: 'Lower irradiance. Solar supplemental; gas or nuclear PPA preferred for firm AI load.' }
 }
@@ -98,7 +98,7 @@ function Row({ label, value, color }: { label: string; value: React.ReactNode; c
   return (
     <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mb: 0.6 }}>
       <span style={{ ...S_KEY }}>{label}</span>
-      <span style={{ ...S_VAL, color: color ?? '#d7e2ff' }}>{value}</span>
+      <span style={{ ...S_VAL, color: color ?? avalonPalette.textPrimary }}>{value}</span>
     </Box>
   )
 }
@@ -106,7 +106,12 @@ function Row({ label, value, color }: { label: string; value: React.ReactNode; c
 function IntelSection({ head, children }: { head: string; children: React.ReactNode }) {
   return (
     <Box sx={{ mb: 2 }}>
-      <Typography sx={S_SECTION_HEAD}>{head}</Typography>
+      <Box sx={{
+        display: 'flex', alignItems: 'center', gap: 1, mb: 1.5,
+        pl: 1.25, borderLeft: '2px solid', borderColor: avalonPalette.signal,
+      }}>
+        <Typography sx={S_SECTION_HEAD}>{head}</Typography>
+      </Box>
       {children}
     </Box>
   )
@@ -114,7 +119,13 @@ function IntelSection({ head, children }: { head: string; children: React.ReactN
 
 function CalloutBox({ head, children }: { head: string; children: React.ReactNode }) {
   return (
-    <Box sx={{ mt: 1.5, p: 1.25, bgcolor: avalonPalette.bgInput, border: `1px solid ${avalonPalette.border}`, borderRadius: 0.5 }}>
+    <Box sx={{
+      mt: 1.5, p: 1.25,
+      bgcolor: 'rgba(14,165,233,0.06)',
+      border: '1px solid rgba(14,165,233,0.2)',
+      borderLeft: `3px solid ${avalonPalette.signal}`,
+      borderRadius: '10px',
+    }}>
       <Typography sx={S_SUB_HEAD}>{head}</Typography>
       {children}
     </Box>
@@ -162,54 +173,52 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
       <Box sx={{
         p: '14px 16px 12px',
         borderBottom: `1px solid ${avalonPalette.border}`,
-        bgcolor: '#060810',
         flexShrink: 0,
-        background: 'linear-gradient(180deg, #060a18 0%, #090b12 100%)',
+        background: 'linear-gradient(90deg, rgba(14,165,233,0.16) 0%, rgba(129,140,248,0.18) 100%)',
       }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-          <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 10, letterSpacing: '0.24em', color: avalonPalette.amber, textTransform: 'uppercase' }}>
-            ◆ SITE INTELLIGENCE · 3D VIEW
+          <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700, fontSize: 10, letterSpacing: '0.2em', color: avalonPalette.signal, textTransform: 'uppercase' }}>
+            SITE INTELLIGENCE · 3D VIEW
           </Typography>
           <button
             onClick={onExit}
             style={{
-              background: 'none', border: `1px solid ${avalonPalette.border}`,
-              color: avalonPalette.whiteDim, fontFamily: '"VT323", monospace',
-              fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer',
-              padding: '2px 8px', borderRadius: 3,
+              background: 'none', border: `1px solid ${avalonPalette.rose}`,
+              color: avalonPalette.rose, fontFamily: '"Space Grotesk", sans-serif',
+              fontWeight: 600, fontSize: 10, letterSpacing: '0.06em', cursor: 'pointer',
+              padding: '3px 10px', borderRadius: 999,
             }}
           >
             EXIT 3D ✕
           </button>
         </Box>
-        <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 22, letterSpacing: '0.06em', color: '#e6efff', lineHeight: 1.1, mt: 0.5 }}>
+        <Typography sx={{ fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', fontWeight: 700, fontSize: 22, letterSpacing: '0.02em', color: avalonPalette.textBright, lineHeight: 1.1, mt: 0.5 }}>
           {site.site_id}
         </Typography>
-        <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, mt: 0.25 }}>
+        <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, mt: 0.25 }}>
           {site.lat.toFixed(5)}°N · {Math.abs(site.lon).toFixed(5)}°W
         </Typography>
 
         <Box sx={{ mt: 1.25, display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Typography sx={{
-            fontFamily: '"VT323", monospace', fontSize: 30, lineHeight: 1,
-            color: killed ? avalonPalette.red : avalonPalette.cyan,
-            textShadow: killed ? `0 0 12px ${avalonPalette.red}66` : `0 0 12px ${avalonPalette.cyan}55`,
+            fontFamily: '"Rajdhani", "Space Grotesk", sans-serif', fontWeight: 700, fontSize: 32, lineHeight: 1,
+            color: killed ? avalonPalette.rose : avalonPalette.signal,
           }}>
             {killed ? 'KILLED' : site.composite.toFixed(2)}
           </Typography>
           {!killed && (
-            <Box sx={{ flex: 1, height: 5, bgcolor: avalonPalette.bgInput, borderRadius: 0.5, overflow: 'hidden' }}>
+            <Box sx={{ flex: 1, height: 5, bgcolor: avalonPalette.bgInput, borderRadius: 999, overflow: 'hidden' }}>
               <Box sx={{
                 height: '100%',
                 width: `${(site.composite / 10) * 100}%`,
-                bgcolor: site.composite > 7 ? avalonPalette.green : site.composite > 4 ? avalonPalette.amber : avalonPalette.red,
+                bgcolor: site.composite > 7 ? avalonPalette.emerald : site.composite > 4 ? avalonPalette.amber : avalonPalette.rose,
                 transition: 'width 0.5s ease',
               }} />
             </Box>
           )}
         </Box>
         {killed && (
-          <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.red, mt: 0.5 }}>
+          <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.rose, mt: 0.5 }}>
             Kill flags: {Object.entries(site.kill_flags ?? {}).filter(([, v]) => v).map(([k]) => k).join(', ')}
           </Typography>
         )}
@@ -225,7 +234,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
             <Box sx={{ mb: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
               {site.imputed.map((f) => (
                 <Box key={f} sx={{
-                  fontSize: 8, fontFamily: '"VT323", monospace', letterSpacing: '0.1em',
+                  fontSize: 8, fontFamily: '"Space Grotesk", sans-serif', letterSpacing: '0.1em',
                   color: avalonPalette.amber, border: `1px solid ${avalonPalette.amberDim}`,
                   px: 0.75, py: 0.25, borderRadius: 0.5,
                 }}>STUB: {f}</Box>
@@ -246,11 +255,11 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
                   <Box key={factorName} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, opacity: factor.killed ? 0.5 : 1 }}>
                     <Box sx={{ width: 3, height: 26, bgcolor: color, borderRadius: '2px', flexShrink: 0 }} />
                     <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 7.5, color: avalonPalette.whiteDim, textTransform: 'uppercase', lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 7.5, color: avalonPalette.whiteDim, textTransform: 'uppercase', lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {factorName.replace(/_/g, ' ')}
                       </Typography>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 15, color, lineHeight: 1 }}>
+                        <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 15, color, lineHeight: 1 }}>
                           {factor.killed ? 'KO' : (n * 100).toFixed(0)}
                         </Typography>
                         {!factor.killed && (
@@ -269,7 +278,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
 
         {/* Power Grid */}
-        <IntelSection head="⚡  POWER GRID ACCESS">
+        <IntelSection head="POWER GRID ACCESS">
           {txDistMi != null ? (
             <>
               <Row
@@ -288,7 +297,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
               )}
             </>
           ) : (
-            <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, fontStyle: 'italic' }}>
+            <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, fontStyle: 'italic' }}>
               Transmission data unavailable — factor may be imputed.
             </Typography>
           )}
@@ -296,7 +305,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
           {tap && (
             <CalloutBox head="Tap Line Assessment">
               <Row label="Est. cost" value={tap.cost} color={tap.color} />
-              <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, mt: 0.5, lineHeight: 1.5 }}>
+              <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, mt: 0.5, lineHeight: 1.5 }}>
                 {tap.note}
               </Typography>
             </CalloutBox>
@@ -304,7 +313,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
 
           {subDistMi != null && (
             <CalloutBox head="New Substation">
-              <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, lineHeight: 1.5 }}>
+              <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, lineHeight: 1.5 }}>
                 {substationNote(subDistMi, subVoltKv)}
               </Typography>
             </CalloutBox>
@@ -314,7 +323,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
 
         {/* On-Site Generation */}
-        <IntelSection head="🔥  ON-SITE GENERATION">
+        <IntelSection head="ON-SITE GENERATION">
           {gasDistMi != null ? (
             <>
               <Row label="Gas pipeline" value={`${gasDistMi.toFixed(1)} mi`} />
@@ -324,11 +333,11 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
             <Row label="Gas pipeline" value="—" />
           )}
           <Row label="Solar potential" value={solar.label} color={solar.color} />
-          <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, mt: 0.75, lineHeight: 1.5 }}>
+          <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, mt: 0.75, lineHeight: 1.5 }}>
             {solar.detail}
           </Typography>
           <CalloutBox head="Private Power Strategy">
-            <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, lineHeight: 1.5 }}>
+            <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim, lineHeight: 1.5 }}>
               {gasDistMi != null && gasDistMi <= 15
                 ? `Gas pipeline ${gasDistMi.toFixed(1)} mi away makes a private microgrid viable. Combined with solar+BESS, this site could operate off-grid — bypassing interconnection queues entirely.`
                 : `Grid connection remains primary path. Solar PPA + BESS can reduce grid dependency and improve power cost score over time.`
@@ -340,7 +349,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
 
         {/* Fiber */}
-        <IntelSection head="📡  FIBER & LATENCY">
+        <IntelSection head="FIBER & LATENCY">
           {fiberPopKm != null && <Row label="Nearest POP" value={`${fiberPopKm.toFixed(0)} km`} />}
           {fiberIxpKm != null && <Row label="Nearest IXP" value={`${fiberIxpKm.toFixed(0)} km`} />}
           <Row
@@ -358,7 +367,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
 
         {/* Water + Climate + Hazard */}
-        <IntelSection head="💧  WATER · CLIMATE · HAZARD">
+        <IntelSection head="WATER · CLIMATE · HAZARD">
           <Row label="Water"   value={site.factors?.water?.normalized?.toFixed(2)   ?? '—'} color={scoreColor(site.factors?.water?.normalized)} />
           <Row label="Climate" value={site.factors?.climate?.normalized?.toFixed(2) ?? '—'} color={scoreColor(site.factors?.climate?.normalized)} />
           <Row label="Hazard"  value={site.factors?.hazard?.normalized?.toFixed(2)  ?? '—'} color={scoreColor(site.factors?.hazard?.normalized)} />
@@ -367,7 +376,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
 
         {/* Land + Community */}
-        <IntelSection head="🗺  LAND · PERMITTING · COMMUNITY">
+        <IntelSection head="LAND · PERMITTING · COMMUNITY">
           <Row label="Land / zoning"  value={site.factors?.land_zoning?.normalized?.toFixed(2)   ?? '—'} color={scoreColor(site.factors?.land_zoning?.normalized)} />
           <Row label="Permitting"     value={site.factors?.permitting?.normalized?.toFixed(2)     ?? '—'} color={scoreColor(site.factors?.permitting?.normalized)} />
           <Row label="Tax incentives" value={site.factors?.tax_incentives?.normalized?.toFixed(2) ?? '—'} color={scoreColor(site.factors?.tax_incentives?.normalized)} />
@@ -378,7 +387,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
 
         {/* 3D Buildings Legend */}
-        <IntelSection head="🏗  3D BUILDINGS LEGEND">
+        <IntelSection head="3D BUILDINGS LEGEND">
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8 }}>
             {Object.entries(DEEP_DIVE_BUILDING_PALETTE).map(([, { color, label }]) => (
               <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -386,13 +395,13 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
                   width: 11, height: 11, bgcolor: color, borderRadius: '2px', flexShrink: 0,
                   border: '1px solid rgba(255,255,255,0.22)',
                 }} />
-                <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: '#d7e2ff' }}>
+                <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: '#d7e2ff' }}>
                   {label}
                 </Typography>
               </Box>
             ))}
           </Box>
-          <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 8.5, color: avalonPalette.whiteDim, mt: 1, lineHeight: 1.5 }}>
+          <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 8.5, color: avalonPalette.whiteDim, mt: 1, lineHeight: 1.5 }}>
             Land use visible at zoom ≥ 13. Industrial (orange) indicates existing compatible use.
             Residential (slate) signals permitting friction. Rotate map with right-click to explore.
           </Typography>
@@ -414,7 +423,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
           variant="outlined"
           onClick={onOpenDetail}
           sx={{
-            fontFamily: '"VT323", monospace', fontSize: 12, letterSpacing: '0.1em',
+            fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, letterSpacing: '0.1em',
             color: avalonPalette.cyan, borderColor: avalonPalette.cyanDim,
             '&:hover': { borderColor: avalonPalette.cyan, bgcolor: `${avalonPalette.cyan}14` },
           }}
@@ -426,7 +435,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
           variant="contained"
           onClick={onExit}
           sx={{
-            fontFamily: '"VT323", monospace', fontSize: 12, letterSpacing: '0.1em',
+            fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, letterSpacing: '0.1em',
             bgcolor: avalonPalette.amber, color: avalonPalette.bg,
             '&:hover': { bgcolor: avalonPalette.amberDim },
           }}
@@ -437,3 +446,5 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
     </Box>
   )
 }
+
+

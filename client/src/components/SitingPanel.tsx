@@ -213,22 +213,22 @@ const VOLTAGE_LEGEND_ITEMS: Array<{ label: string; color: string }> = [
 ]
 
 function colorForScore(score: number, killed: boolean): string {
-  if (killed) return '#3a1018'
-  // 0..10 → red..amber..green
+  if (killed) return '#1a0812'
+  // 0..10 → rose..amber..emerald
   const t = Math.max(0, Math.min(1, score / 10))
   if (t < 0.5) {
     const k = t / 0.5
-    // red -> amber
-    const r = Math.round(255)
-    const g = Math.round(26 + (149 - 26) * k)
-    const b = Math.round(64 - 64 * k)
+    // rose #f43f5e (244,63,94) -> amber #f59e0b (245,158,11)
+    const r = Math.round(244 + (245 - 244) * k)
+    const g = Math.round(63 + (158 - 63) * k)
+    const b = Math.round(94 + (11 - 94) * k)
     return `rgb(${r},${g},${b})`
   } else {
     const k = (t - 0.5) / 0.5
-    // amber -> green
-    const r = Math.round(255 - (255 - 57) * k)
-    const g = Math.round(149 + (211 - 149) * k)
-    const b = Math.round(0 + 83 * k)
+    // amber #f59e0b (245,158,11) -> emerald #10b981 (16,185,129)
+    const r = Math.round(245 + (16 - 245) * k)
+    const g = Math.round(158 + (185 - 158) * k)
+    const b = Math.round(11 + (129 - 11) * k)
     return `rgb(${r},${g},${b})`
   }
 }
@@ -1758,11 +1758,11 @@ export default function SitingPanel() {
                 <MenuItem value="NC">NC</MenuItem>
               )}
               {stateOptions.length > 0 && [
-                <ListSubheader key="duke-hdr" sx={{ background: 'transparent', color: avalonPalette.amber, lineHeight: '24px', fontFamily: '"VT323", monospace', letterSpacing: '0.18em' }}>Duke territory</ListSubheader>,
+                <ListSubheader key="duke-hdr" sx={{ background: 'transparent', color: avalonPalette.amber, lineHeight: '24px', fontFamily: '"Space Grotesk", sans-serif', letterSpacing: '0.18em' }}>Duke territory</ListSubheader>,
                 ...stateOptions.filter(s => s.duke).map(s => (
                   <MenuItem key={s.code} value={s.code}>{s.code}</MenuItem>
                 )),
-                <ListSubheader key="other-hdr" sx={{ background: 'transparent', color: avalonPalette.amber, lineHeight: '24px', fontFamily: '"VT323", monospace', letterSpacing: '0.18em' }}>Other</ListSubheader>,
+                <ListSubheader key="other-hdr" sx={{ background: 'transparent', color: avalonPalette.amber, lineHeight: '24px', fontFamily: '"Space Grotesk", sans-serif', letterSpacing: '0.18em' }}>Other</ListSubheader>,
                 ...stateOptions.filter(s => !s.duke).map(s => (
                   <MenuItem key={s.code} value={s.code}>{s.code}</MenuItem>
                 )),
@@ -2570,7 +2570,7 @@ export default function SitingPanel() {
                   URL.revokeObjectURL(url)
                 }}
                 sx={{
-                  fontFamily: '"VT323", monospace',
+                  fontFamily: '"Space Grotesk", sans-serif',
                   fontSize: 10,
                   color: avalonPalette.cyan,
                   textTransform: 'uppercase',
@@ -2613,7 +2613,7 @@ export default function SitingPanel() {
                   URL.revokeObjectURL(url)
                 }}
                 sx={{
-                  fontFamily: '"VT323", monospace',
+                  fontFamily: '"Space Grotesk", sans-serif',
                   fontSize: 10,
                   color: avalonPalette.amber,
                   textTransform: 'uppercase',
@@ -2637,6 +2637,12 @@ export default function SitingPanel() {
             const killed = Object.values(s.kill_flags).some(Boolean)
             const scoreColor = colorForScore(s.composite, killed)
             const isSelected = selectedId === s.site_id
+            const topFactors = killed
+              ? []
+              : Object.entries(s.factors ?? {})
+                  .filter(([, f]) => !f.killed && !f.stub)
+                  .sort(([, a], [, b]) => (b.weighted ?? 0) - (a.weighted ?? 0))
+                  .slice(0, 3)
             return (
               <Box
                 component="li"
@@ -2645,30 +2651,32 @@ export default function SitingPanel() {
                 sx={{
                   mx: 1,
                   my: 0.5,
-                  px: 1.75,
-                  py: 1.25,
-                  minHeight: { xs: 52, sm: 44 },
+                  p: '10px 14px',
+                  minHeight: { xs: 56, sm: 48 },
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 0.75,
                   cursor: 'pointer',
-                  borderRadius: '10px',
+                  borderRadius: '12px',
                   border: '1px solid',
-                  borderColor: isSelected ? 'rgba(0,229,255,0.45)' : 'transparent',
-                  bgcolor: isSelected ? 'rgba(0,229,255,0.10)' : 'transparent',
-                  transition: 'background 0.12s, border-color 0.12s',
+                  borderColor: isSelected ? avalonPalette.signal : avalonPalette.border,
+                  bgcolor: isSelected ? 'rgba(14,165,233,0.08)' : avalonPalette.bgInput,
+                  boxShadow: isSelected
+                    ? `0 0 0 1px ${avalonPalette.signal}, 0 4px 16px rgba(14,165,233,0.15)`
+                    : 'none',
+                  transition: 'all 0.15s ease',
                   touchAction: 'manipulation',
                   '&:hover': {
-                    bgcolor: isSelected ? 'rgba(0,229,255,0.14)' : 'rgba(95,114,255,0.10)',
-                    borderColor: isSelected ? 'rgba(0,229,255,0.45)' : 'rgba(95,114,255,0.22)',
+                    borderColor: isSelected ? avalonPalette.signal : avalonPalette.borderSoft,
+                    bgcolor: isSelected ? 'rgba(14,165,233,0.10)' : 'rgba(14,165,233,0.04)',
                   },
                 }}
               >
-                {/* Row: rank # · site id · score */}
+                {/* Row 1: rank · site id · score */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
                   <Typography sx={{
-                    fontFamily: 'var(--font-display)',
-                    fontSize: 13,
+                    fontFamily: '"JetBrains Mono", monospace',
+                    fontSize: 11,
                     color: avalonPalette.whiteDim,
                     width: 22,
                     textAlign: 'right',
@@ -2678,9 +2686,11 @@ export default function SitingPanel() {
                   </Typography>
                   <Typography sx={{
                     flex: 1,
-                    fontSize: { xs: 12, sm: 11 },
-                    color: killed ? '#5a4040' : '#dbe6ff',
-                    letterSpacing: '0.05em',
+                    fontFamily: '"Space Grotesk", sans-serif',
+                    fontWeight: 600,
+                    fontSize: 12,
+                    color: killed ? avalonPalette.whiteDim : avalonPalette.textPrimary,
+                    letterSpacing: '0.02em',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -2689,17 +2699,17 @@ export default function SitingPanel() {
                     {s.site_id}
                   </Typography>
                   <Typography sx={{
-                    fontFamily: 'var(--font-display)',
-                    fontSize: { xs: 20, sm: 22 },
+                    fontFamily: '"Rajdhani", "Space Grotesk", sans-serif',
+                    fontWeight: 700,
+                    fontSize: 22,
                     lineHeight: 1,
                     color: scoreColor,
-                    textShadow: `0 0 6px ${scoreColor}`,
                     flexShrink: 0,
                   }}>
-                    {s.composite.toFixed(2)}
+                    {killed ? 'KO' : s.composite.toFixed(2)}
                   </Typography>
                 </Box>
-                {/* Score bar */}
+                {/* Row 2: score bar */}
                 {!killed && (
                   <LinearProgress
                     variant="determinate"
@@ -2710,14 +2720,39 @@ export default function SitingPanel() {
                       bgcolor: 'rgba(255,255,255,0.06)',
                       '& .MuiLinearProgress-bar': {
                         bgcolor: scoreColor,
-                        boxShadow: `0 0 5px ${scoreColor}`,
                         borderRadius: 2,
                         transition: 'width 0.4s ease',
                       },
                     }}
                   />
                 )}
-                {/* Kill chips */}
+                {/* Row 3: top factor chips OR kill chips */}
+                {!killed && topFactors.length > 0 && (
+                  <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25, flexWrap: 'wrap' }}>
+                    {topFactors.map(([name, f]) => {
+                      const n = f.normalized ?? 0
+                      const chipColor = n > 0.7 ? avalonPalette.emerald : n > 0.4 ? avalonPalette.amber : avalonPalette.rose
+                      return (
+                        <Box key={name} sx={{
+                          px: 0.75,
+                          py: '2px',
+                          borderRadius: '6px',
+                          bgcolor: 'rgba(14,165,233,0.10)',
+                          border: '1px solid rgba(14,165,233,0.2)',
+                          fontFamily: '"Space Grotesk", sans-serif',
+                          fontSize: 9,
+                          fontWeight: 600,
+                          color: chipColor,
+                          letterSpacing: '0.05em',
+                          textTransform: 'uppercase',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {name.replace(/_/g, ' ')} {(n * 100).toFixed(0)}
+                        </Box>
+                      )
+                    })}
+                  </Box>
+                )}
                 {killed && (
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                     {Object.entries(s.kill_flags).filter(([, v]) => v).map(([k]) => (
@@ -2728,11 +2763,12 @@ export default function SitingPanel() {
                         sx={{
                           height: 16,
                           fontSize: 9,
-                          fontFamily: '"VT323", monospace',
-                          letterSpacing: '0.08em',
-                          bgcolor: avalonPalette.red,
+                          fontFamily: '"Space Grotesk", sans-serif',
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          bgcolor: avalonPalette.rose,
                           color: '#fff',
-                          borderRadius: '3px',
+                          borderRadius: '4px',
                         }}
                       />
                     ))}
@@ -2759,3 +2795,4 @@ export default function SitingPanel() {
     </div>
   )
 }
+

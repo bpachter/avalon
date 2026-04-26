@@ -1,4 +1,4 @@
-﻿import { useState, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Drawer, Box, Typography, Button, Divider, Chip, IconButton, CircularProgress } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
@@ -13,21 +13,23 @@ interface SiteDetailsModalProps {
 }
 
 function factorColor(factor: FactorResultDTO): string {
-  if (factor.killed) return avalonPalette.red
+  if (factor.killed) return avalonPalette.rose
   if (factor.stub) return avalonPalette.whiteDim
   const n = factor.normalized ?? 0
   const t = Math.max(0, Math.min(1, n))
   if (t < 0.5) {
     const k = t / 0.5
-    const r = Math.round(255)
-    const g = Math.round(26 + (149 - 26) * k)
-    const b = Math.round(64 - 64 * k)
+    // rose #f43f5e -> amber #f59e0b
+    const r = Math.round(244 + (245 - 244) * k)
+    const g = Math.round(63 + (158 - 63) * k)
+    const b = Math.round(94 + (11 - 94) * k)
     return `rgb(${r},${g},${b})`
   } else {
     const k = (t - 0.5) / 0.5
-    const r = Math.round(255 - (255 - 57) * k)
-    const g = Math.round(149 + (211 - 149) * k)
-    const b = Math.round(0 + 83 * k)
+    // amber -> emerald #10b981
+    const r = Math.round(245 + (16 - 245) * k)
+    const g = Math.round(158 + (185 - 158) * k)
+    const b = Math.round(11 + (129 - 11) * k)
     return `rgb(${r},${g},${b})`
   }
 }
@@ -39,9 +41,9 @@ function FactorsPanel({ site }: { site: SiteResultDTO }) {
       {killReasons.length > 0 && (
         <>
           <Box sx={{ mb: 2 }}>
-            <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.red, mb: 1 }}>Kill Flags</Typography>
+            <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.red, mb: 1 }}>Kill Flags</Typography>
             <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-              {killReasons.map((r) => <Chip key={r} label={r} size="small" sx={{ fontFamily: '"VT323", monospace', fontSize: 10, height: 24, bgcolor: avalonPalette.red, color: avalonPalette.bg }} />)}
+              {killReasons.map((r) => <Chip key={r} label={r} size="small" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 10, height: 24, bgcolor: avalonPalette.red, color: avalonPalette.bg }} />)}
             </Box>
           </Box>
           <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
@@ -50,16 +52,16 @@ function FactorsPanel({ site }: { site: SiteResultDTO }) {
       {(site.imputed?.length ?? 0) > 0 && (
         <>
           <Box sx={{ mb: 2 }}>
-            <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.amberDim, mb: 1 }}>Imputed Data</Typography>
+            <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.amberDim, mb: 1 }}>Imputed Data</Typography>
             <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-              {site.imputed.map((f) => <Chip key={f} label={f} size="small" variant="outlined" sx={{ fontFamily: '"VT323", monospace', fontSize: 10, height: 24, bgcolor: avalonPalette.bgInput, color: avalonPalette.amber, border: `1px solid ${avalonPalette.amberDim}` }} />)}
+              {site.imputed.map((f) => <Chip key={f} label={f} size="small" variant="outlined" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 10, height: 24, bgcolor: avalonPalette.bgInput, color: avalonPalette.amber, border: `1px solid ${avalonPalette.amberDim}` }} />)}
             </Box>
           </Box>
           <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
         </>
       )}
       <Box>
-        <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.whiteDim, mb: 1.5 }}>14-Factor Breakdown</Typography>
+        <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.whiteDim, mb: 1.5 }}>14-Factor Breakdown</Typography>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {Object.entries(site.factors ?? {})
             .sort(([, a], [, b]) => (b.weighted ?? 0) - (a.weighted ?? 0))
@@ -67,10 +69,10 @@ function FactorsPanel({ site }: { site: SiteResultDTO }) {
               <Box key={factorName} sx={{ p: 1.25, bgcolor: avalonPalette.bgInput, border: `1px solid ${avalonPalette.border}`, borderRadius: 0.5, opacity: factor.killed ? 0.4 : 1 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.75 }}>
                   <Box>
-                    <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 11, letterSpacing: '0.08em', color: factorColor(factor), textTransform: 'uppercase' }}>{factorName}</Typography>
-                    {factor.stub && <Chip label="STUB" size="small" variant="outlined" sx={{ fontFamily: '"VT323", monospace', fontSize: 9, height: 18, mt: 0.5, bgcolor: avalonPalette.bgPanel, color: avalonPalette.whiteDim, border: `1px solid ${avalonPalette.border}` }} />}
+                    <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 11, letterSpacing: '0.08em', color: factorColor(factor), textTransform: 'uppercase' }}>{factorName}</Typography>
+                    {factor.stub && <Chip label="STUB" size="small" variant="outlined" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 9, height: 18, mt: 0.5, bgcolor: avalonPalette.bgPanel, color: avalonPalette.whiteDim, border: `1px solid ${avalonPalette.border}` }} />}
                   </Box>
-                  <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, fontWeight: 'bold', color: factorColor(factor), minWidth: '48px', textAlign: 'right' }}>
+                  <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, fontWeight: 'bold', color: factorColor(factor), minWidth: '48px', textAlign: 'right' }}>
                     {factor.killed ? 'x' : factor.normalized.toFixed(2)}
                   </Typography>
                 </Box>
@@ -79,9 +81,9 @@ function FactorsPanel({ site }: { site: SiteResultDTO }) {
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                   {([['raw', factor.raw_value != null ? factor.raw_value.toFixed(3) : 'null'], ['weight', (factor.weight ?? 0).toFixed(3)], ['normalized', factor.normalized.toFixed(3)]] as [string, string][]).map(([lbl, val]) => (
-                    <Typography key={lbl} sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim }}>{lbl}: {val}</Typography>
+                    <Typography key={lbl} sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim }}>{lbl}: {val}</Typography>
                   ))}
-                  <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.amber }}>weighted: {(factor.weighted ?? 0).toFixed(3)}</Typography>
+                  <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.amber }}>weighted: {(factor.weighted ?? 0).toFixed(3)}</Typography>
                 </Box>
               </Box>
             ))}
@@ -115,7 +117,7 @@ function AiPanel({ site }: { site: SiteResultDTO }) {
     return (
       <Box sx={{ textAlign: 'center', py: 6 }}>
         <CircularProgress size={32} sx={{ color: avalonPalette.cyan, mb: 2 }} />
-        <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, color: avalonPalette.whiteDim }}>
+        <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, color: avalonPalette.whiteDim }}>
           Analyzing {Object.keys(site.factors ?? {}).length} factors with Mithrandir...
         </Typography>
       </Box>
@@ -125,13 +127,13 @@ function AiPanel({ site }: { site: SiteResultDTO }) {
   if (!narratives) {
     return (
       <Box sx={{ textAlign: 'center', py: 4 }}>
-        <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, color: avalonPalette.whiteDim, mb: 2, letterSpacing: '0.06em', lineHeight: 1.7 }}>
+        <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, color: avalonPalette.whiteDim, mb: 2, letterSpacing: '0.06em', lineHeight: 1.7 }}>
           Mithrandir (Gemma4 26B on local GPU) will analyze each scoring factor
           and generate a site assessment narrative. Requires OLLAMA_URL on the server.
         </Typography>
-        {error && <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 10, color: avalonPalette.red, mb: 2 }}>{error}</Typography>}
+        {error && <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 10, color: avalonPalette.red, mb: 2 }}>{error}</Typography>}
         <Button variant="contained" onClick={generate} startIcon={<AutoAwesomeIcon />}
-          sx={{ bgcolor: avalonPalette.amber, color: avalonPalette.bg, fontFamily: '"VT323", monospace', fontSize: 14, letterSpacing: '0.1em', textTransform: 'uppercase', '&:hover': { bgcolor: avalonPalette.amberDim } }}>
+          sx={{ bgcolor: avalonPalette.signal, color: '#fff', fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: '0.08em', textTransform: 'uppercase', borderRadius: '10px', px: 2.5, py: 1, '&:hover': { bgcolor: '#38bdf8' } }}>
           Generate AI Analysis
         </Button>
       </Box>
@@ -142,8 +144,8 @@ function AiPanel({ site }: { site: SiteResultDTO }) {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {narratives.overall_summary && (
         <Box sx={{ p: 1.5, bgcolor: `${avalonPalette.cyan}18`, border: `1px solid ${avalonPalette.cyan}55`, borderRadius: 1 }}>
-          <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, letterSpacing: '0.08em', color: avalonPalette.cyan, mb: 1, textTransform: 'uppercase' }}>Executive Summary</Typography>
-          <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9.5, color: '#e8eaf6', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{narratives.overall_summary}</Typography>
+          <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, letterSpacing: '0.08em', color: avalonPalette.cyan, mb: 1, textTransform: 'uppercase' }}>Executive Summary</Typography>
+          <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9.5, color: '#e8eaf6', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{narratives.overall_summary}</Typography>
         </Box>
       )}
       {Object.entries(narratives).filter(([k]) => k !== 'overall_summary')
@@ -155,15 +157,15 @@ function AiPanel({ site }: { site: SiteResultDTO }) {
           return (
             <Box key={factorName} sx={{ p: 1.25, bgcolor: avalonPalette.bgInput, border: `1px solid ${avalonPalette.border}`, borderRadius: 0.5 }}>
               <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75 }}>
-                <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 11, letterSpacing: '0.08em', color, textTransform: 'uppercase' }}>{factorName.replace(/_/g, ' ')}</Typography>
-                {factor?.normalized != null && <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim }}>[{factor.normalized.toFixed(2)}]</Typography>}
+                <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 11, letterSpacing: '0.08em', color, textTransform: 'uppercase' }}>{factorName.replace(/_/g, ' ')}</Typography>
+                {factor?.normalized != null && <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: avalonPalette.whiteDim }}>[{factor.normalized.toFixed(2)}]</Typography>}
               </Box>
-              <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9.5, color: isPlaceholder ? avalonPalette.whiteDim : '#e8eaf6', fontStyle: isPlaceholder ? 'italic' : 'normal', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{narrative}</Typography>
+              <Typography sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9.5, color: isPlaceholder ? avalonPalette.whiteDim : '#e8eaf6', fontStyle: isPlaceholder ? 'italic' : 'normal', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{narrative}</Typography>
             </Box>
           )
         })}
       <Button size="small" onClick={() => setNarratives(null)} startIcon={<AutoAwesomeIcon />}
-        sx={{ color: avalonPalette.amber, fontFamily: '"VT323", monospace', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', alignSelf: 'flex-start' }}>
+        sx={{ color: avalonPalette.amber, fontFamily: '"Space Grotesk", sans-serif', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', alignSelf: 'flex-start' }}>
         Regenerate
       </Button>
     </Box>
@@ -193,22 +195,22 @@ export default function SiteDetailsModal({ site, open, onClose }: SiteDetailsMod
     >
       <Box sx={{ p: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" sx={{ fontFamily: '"VT323", monospace', fontSize: 18, letterSpacing: '0.1em' }}>SITE DETAILS</Typography>
+          <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 18, letterSpacing: '0.1em' }}>SITE DETAILS</Typography>
           <IconButton size="small" onClick={onClose} sx={{ color: avalonPalette.whiteDim }}><CloseIcon /></IconButton>
         </Box>
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
         <Box sx={{ mb: 2 }}>
-          <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 14, color: avalonPalette.whiteDim, mb: 0.5, letterSpacing: '0.08em' }}>ID</Typography>
-          <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 16, mb: 1 }}>{site.site_id}</Typography>
-          <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, color: avalonPalette.whiteDim, letterSpacing: '0.08em' }}>
+          <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 14, color: avalonPalette.whiteDim, mb: 0.5, letterSpacing: '0.08em' }}>ID</Typography>
+          <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 16, mb: 1 }}>{site.site_id}</Typography>
+          <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, color: avalonPalette.whiteDim, letterSpacing: '0.08em' }}>
             {site.lat.toFixed(6)}N, {Math.abs(site.lon).toFixed(6)}W
           </Typography>
         </Box>
         <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
         <Box sx={{ mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 1 }}>
-            <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.whiteDim }}>Composite Score</Typography>
-            <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 20, fontWeight: 'bold', color: killed ? avalonPalette.red : avalonPalette.cyan }}>{killed ? 'KILLED' : site.composite.toFixed(2)}</Typography>
+            <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: avalonPalette.whiteDim }}>Composite Score</Typography>
+            <Typography sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: 20, fontWeight: 'bold', color: killed ? avalonPalette.red : avalonPalette.cyan }}>{killed ? 'KILLED' : site.composite.toFixed(2)}</Typography>
           </Box>
           {!killed && (
             <Box sx={{ height: 6, bgcolor: avalonPalette.bgInput, borderRadius: 1, overflow: 'hidden' }}>
@@ -220,7 +222,7 @@ export default function SiteDetailsModal({ site, open, onClose }: SiteDetailsMod
         <Box sx={{ display: 'flex', gap: 0.5, mb: 2 }}>
           {(['factors', 'ai'] as const).map((tab) => (
             <Button key={tab} size="small" onClick={() => setActiveTab(tab)}
-              sx={{ flex: 1, fontFamily: '"VT323", monospace', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', py: 0.5, bgcolor: activeTab === tab ? avalonPalette.bgInput : 'transparent', color: activeTab === tab ? avalonPalette.cyan : avalonPalette.whiteDim, border: `1px solid ${activeTab === tab ? avalonPalette.cyan : avalonPalette.border}`, borderRadius: 0.5, '&:hover': { bgcolor: avalonPalette.bgInput } }}>
+              sx={{ flex: 1, fontFamily: '"Space Grotesk", sans-serif', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', py: 0.5, bgcolor: activeTab === tab ? avalonPalette.bgInput : 'transparent', color: activeTab === tab ? avalonPalette.cyan : avalonPalette.whiteDim, border: `1px solid ${activeTab === tab ? avalonPalette.cyan : avalonPalette.border}`, borderRadius: 0.5, '&:hover': { bgcolor: avalonPalette.bgInput } }}>
               {tab === 'factors' ? '14-FACTORS' : 'AI ANALYSIS'}
             </Button>
           ))}
@@ -229,10 +231,11 @@ export default function SiteDetailsModal({ site, open, onClose }: SiteDetailsMod
         {activeTab === 'ai' && <AiPanel site={site} />}
         <Divider sx={{ my: 2, borderColor: avalonPalette.border }} />
         <Button variant="contained" fullWidth onClick={onClose}
-          sx={{ bgcolor: avalonPalette.cyan, color: avalonPalette.bg, fontFamily: '"VT323", monospace', textTransform: 'uppercase', letterSpacing: '0.1em', '&:hover': { bgcolor: avalonPalette.cyanDim } }}>
+          sx={{ bgcolor: avalonPalette.cyan, color: avalonPalette.bg, fontFamily: '"Space Grotesk", sans-serif', textTransform: 'uppercase', letterSpacing: '0.1em', '&:hover': { bgcolor: avalonPalette.cyanDim } }}>
           Close
         </Button>
       </Box>
     </Drawer>
   )
 }
+

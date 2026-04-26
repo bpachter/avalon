@@ -1397,13 +1397,6 @@ export default function SitingPanel() {
     [selectedId, sites],
   )
 
-  function flyTo(s: SiteResultDTO) {
-    const map = mapRef.current
-    if (!map) return
-    map.flyTo({ center: [s.lon, s.lat], zoom: 8.5, speed: 1.4 })
-    setSelectedId(s.site_id)
-  }
-
   const syncParcelOutlinesWith3D = useCallback((threeDOn: boolean) => {
     const activeParcelKey = activeParcelLayerKey ?? `${activeState.toLowerCase()}_parcels`
     setEnabledLayers(prev => {
@@ -2703,12 +2696,7 @@ export default function SitingPanel() {
               <Box
                 component="li"
                 key={s.site_id}
-                onClick={() => {
-                  flyTo(s)
-                  setSelectedPanelCollapsed(false)
-                  setDetailSite(s)
-                  setDetailOpen(true)
-                }}
+                onClick={() => enterDeepDive(s)}
                 sx={{
                   mx: 1,
                   my: 0.5,
@@ -2822,7 +2810,6 @@ export default function SitingPanel() {
         site={detailSite}
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
-        onDeepDive={enterDeepDive}
       />
     </div>
   )

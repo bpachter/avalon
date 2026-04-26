@@ -218,6 +218,56 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
       {/* ── Intelligence body ───────────────────────────────────────────────── */}
       <Box sx={{ p: '14px 16px', flex: 1, overflowY: 'auto' }}>
 
+        {/* 14-Factor Score Grid */}
+        <Box sx={{ mb: 2 }}>
+          <Typography sx={{ ...S_SECTION_HEAD, mb: 1 }}>14-FACTOR SCORES</Typography>
+          {(site.imputed?.length ?? 0) > 0 && (
+            <Box sx={{ mb: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {site.imputed.map((f) => (
+                <Box key={f} sx={{
+                  fontSize: 8, fontFamily: '"VT323", monospace', letterSpacing: '0.1em',
+                  color: avalonPalette.amber, border: `1px solid ${avalonPalette.amberDim}`,
+                  px: 0.75, py: 0.25, borderRadius: 0.5,
+                }}>STUB: {f}</Box>
+              ))}
+            </Box>
+          )}
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px' }}>
+            {Object.entries(site.factors ?? {})
+              .sort(([, a], [, b]) => (b.weighted ?? 0) - (a.weighted ?? 0))
+              .map(([factorName, factor]) => {
+                const n = factor.normalized ?? 0
+                const color = factor.killed
+                  ? avalonPalette.red
+                  : n >= 0.7 ? avalonPalette.green
+                  : n >= 0.4 ? avalonPalette.amber
+                  : avalonPalette.red
+                return (
+                  <Box key={factorName} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, opacity: factor.killed ? 0.5 : 1 }}>
+                    <Box sx={{ width: 3, height: 26, bgcolor: color, borderRadius: '2px', flexShrink: 0 }} />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 7.5, color: avalonPalette.whiteDim, textTransform: 'uppercase', lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {factorName.replace(/_/g, ' ')}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Typography sx={{ fontFamily: '"VT323", monospace', fontSize: 15, color, lineHeight: 1 }}>
+                          {factor.killed ? 'KO' : (n * 100).toFixed(0)}
+                        </Typography>
+                        {!factor.killed && (
+                          <Box sx={{ flex: 1, height: 3, bgcolor: avalonPalette.bgInput, borderRadius: 1, overflow: 'hidden' }}>
+                            <Box sx={{ height: '100%', width: `${n * 100}%`, bgcolor: color, borderRadius: 1 }} />
+                          </Box>
+                        )}
+                      </Box>
+                    </Box>
+                  </Box>
+                )
+              })}
+          </Box>
+        </Box>
+
+        <Divider sx={{ mb: 2, borderColor: avalonPalette.border }} />
+
         {/* Power Grid */}
         <IntelSection head="⚡  POWER GRID ACCESS">
           {txDistMi != null ? (
@@ -369,7 +419,7 @@ export default function SiteIntelPanel({ site, onExit, onOpenDetail }: SiteIntel
             '&:hover': { borderColor: avalonPalette.cyan, bgcolor: `${avalonPalette.cyan}14` },
           }}
         >
-          14 FACTORS
+          AI ANALYSIS
         </Button>
         <Button
           fullWidth

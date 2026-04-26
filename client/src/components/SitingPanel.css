@@ -564,7 +564,7 @@
   font-size: 10px;
   color: #8a94aa;
   margin-top: 2px;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
 }
 .dq-err {
   color: var(--red, #ff4d6d);
@@ -576,8 +576,8 @@
 .state-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .state-select {
   background: #0e1218;
-  color: var(--cyan);
-  border: 1px solid var(--cyan-dim);
+  color: var(--signal);
+  border: 1px solid var(--signal-dim);
   font: inherit;
   font-size: 11px;
   padding: 3px 6px;

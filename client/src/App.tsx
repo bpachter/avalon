@@ -12,7 +12,7 @@ export default function App() {
           inset: 0,
           bgcolor: avalonPalette.bg,
           background:
-            'radial-gradient(circle at 8% 12%, rgba(0,229,255,0.06) 0%, rgba(0,229,255,0) 30%), radial-gradient(circle at 88% 0%, rgba(255,149,0,0.10) 0%, rgba(255,149,0,0) 34%), linear-gradient(180deg, #09090b 0%, #101014 100%)',
+            'radial-gradient(circle at 8% 12%, rgba(14,165,233,0.08) 0%, rgba(14,165,233,0) 34%), radial-gradient(circle at 88% 0%, rgba(129,140,248,0.14) 0%, rgba(129,140,248,0) 38%), linear-gradient(180deg, #050810 0%, #0a1020 100%)',
         }}
       >
         <AppBar
@@ -23,20 +23,21 @@ export default function App() {
             left: 0,
             right: 0,
             height: 56,
-            bgcolor: 'rgba(6, 9, 18, 0.72)',
+            bgcolor: 'rgba(10, 16, 32, 0.78)',
             borderBottom: `1px solid ${avalonPalette.border}`,
-            backdropFilter: 'blur(10px)',
+            backdropFilter: 'blur(12px)',
           }}
         >
           <Toolbar variant="dense" sx={{ minHeight: 56, px: { xs: 1.25, sm: 2 }, gap: { xs: 1, sm: 1.5 } }}>
             <Typography
               component="span"
               sx={{
-                fontFamily: 'var(--font-display)',
-                fontSize: { xs: 22, sm: 28 },
-                color: avalonPalette.amber,
-                textShadow: `0 0 18px rgba(255,149,0,0.45), 0 0 34px rgba(255,149,0,0.25)`,
-                letterSpacing: '0.16em',
+                fontFamily: '"Space Grotesk", sans-serif',
+                fontWeight: 700,
+                fontSize: { xs: 20, sm: 25 },
+                color: avalonPalette.signal,
+                textShadow: '0 0 22px rgba(14,165,233,0.28)',
+                letterSpacing: '0.14em',
                 lineHeight: 1,
               }}
             >
@@ -45,6 +46,8 @@ export default function App() {
             <Typography
               component="span"
               sx={{
+                fontFamily: '"Space Grotesk", sans-serif',
+                fontWeight: 500,
                 fontSize: 11,
                 color: avalonPalette.whiteDim,
                 letterSpacing: '0.11em',
@@ -58,11 +61,13 @@ export default function App() {
               underline="none"
               sx={{
                 marginLeft: 'auto',
+                fontFamily: '"Space Grotesk", sans-serif',
+                fontWeight: 600,
                 fontSize: 11,
                 color: avalonPalette.whiteDim,
                 letterSpacing: '0.1em',
                 display: { xs: 'none', sm: 'inline' },
-                '&:hover': { color: avalonPalette.cyan },
+                '&:hover': { color: avalonPalette.signal },
               }}
             >
               ← PORTFOLIO

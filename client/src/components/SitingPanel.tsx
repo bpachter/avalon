@@ -46,6 +46,7 @@ import {
   fetchSitingLiveLayers,
   fetchSitingProxyGeoJSON,
   fetchSitingStates,
+  fetchSitingStateBoundaries,
   fetchSitingMoratoriums,
   fetchSitingCoverage,
   fetchParcelDetail,
@@ -246,6 +247,10 @@ function prettyLayerName(l: LiveLayer): string {
 const TOP_SITE_COUNT = 20
 const CANDIDATE_SITE_COUNT = 80
 const CONUS_BBOX: [number, number, number, number] = [-125, 24, -66, 49]
+const STATE_INTERACT_SRC = 'state-interact-src'
+const STATE_INTERACT_FILL = 'state-interact-fill'
+const STATE_INTERACT_LINE = 'state-interact-line'
+const STATE_INTERACT_EXTRUDE = 'state-interact-extrude'
 
 const FALLBACK_SAMPLE_SITES: Array<{ site_id: string; lat: number; lon: number; state: string }> = [
   { site_id: 'TX-ABL-001', lat: 32.4487, lon: -99.7331, state: 'TX' },
@@ -465,6 +470,12 @@ export default function SitingPanel() {
   // still-in-flight fetch for the same key — critical for fast pan/zoom
   // sequences and state switches where the user has clearly moved on.
   const overlayAbortersRef = useRef<Map<string, AbortController>>(new Map())
+  const stateInteractHandlersRef = useRef<Array<{
+    type: 'click' | 'mouseenter' | 'mouseleave' | 'mousemove'
+    layerId: string
+    fn: (e: any) => void
+  }> | null>(null)
+  const hoveredStateFeatureIdRef = useRef<string | number | null>(null)
   // Aborter for the parcel-popup proximity + attrs fetch pair. Reset when
   // the popup closes, the user clicks a different parcel, or the active
   // state changes mid-flight.
@@ -499,6 +510,10 @@ export default function SitingPanel() {
 
   // ── new: state selector, satellite toggle, moratoriums, parcel popup ──
   const [stateOptions, setStateOptions] = useState<StateOption[]>([])
+  const [stateBoundaryFC, setStateBoundaryFC] = useState<{
+    type: 'FeatureCollection'
+    features: Array<Record<string, unknown>>
+  }>({ type: 'FeatureCollection', features: [] })
   const [activeState, setActiveState] = useState<string>('NC')
   const [basemap, setBasemap] = useState<BasemapKey>('hybrid')
   const [moratoriums, setMoratoriums] = useState<MoratoriumCounty[]>([])
@@ -564,6 +579,168 @@ export default function SitingPanel() {
     sitesHandlersRef.current = null
     if (map.getCanvas().style.cursor === 'pointer') map.getCanvas().style.cursor = ''
   }, [])
+
+  const detachStateInteractHandlers = useCallback((map: MLMap) => {
+    const handlers = stateInteractHandlersRef.current
+    if (!handlers) return
+    for (const h of handlers) {
+      try { map.off(h.type, h.layerId, h.fn) } catch { /* ignore */ }
+    }
+    stateInteractHandlersRef.current = null
+  }, [])
+
+  const clearHoveredState = useCallback((map: MLMap) => {
+    if (hoveredStateFeatureIdRef.current == null) return
+    try {
+      map.setFeatureState(
+        { source: STATE_INTERACT_SRC, id: hoveredStateFeatureIdRef.current },
+        { hover: false },
+      )
+    } catch { /* ignore */ }
+    hoveredStateFeatureIdRef.current = null
+  }, [])
+
+  const syncStateInteractLayers = useCallback((map: MLMap) => {
+    const beforeId = map.getLayer('sites-halo') ? 'sites-halo' : undefined
+    if (map.getSource(STATE_INTERACT_SRC)) {
+      ;(map.getSource(STATE_INTERACT_SRC) as maplibregl.GeoJSONSource).setData(stateBoundaryFC as any)
+    } else {
+      map.addSource(STATE_INTERACT_SRC, {
+        type: 'geojson',
+        data: stateBoundaryFC as any,
+        generateId: true,
+      })
+    }
+
+    if (!map.getLayer(STATE_INTERACT_FILL)) {
+      map.addLayer({
+        id: STATE_INTERACT_FILL,
+        type: 'fill',
+        source: STATE_INTERACT_SRC,
+        paint: {
+          'fill-color': avalonPalette.signal,
+          'fill-opacity': [
+            'case',
+            ['boolean', ['feature-state', 'hover'], false], 0.22,
+            ['==', ['get', 'state_code'], activeState], 0.11,
+            0.035,
+          ] as any,
+        },
+      }, beforeId)
+    }
+    if (!map.getLayer(STATE_INTERACT_EXTRUDE)) {
+      map.addLayer({
+        id: STATE_INTERACT_EXTRUDE,
+        type: 'fill-extrusion',
+        source: STATE_INTERACT_SRC,
+        paint: {
+          'fill-extrusion-color': avalonPalette.signal,
+          'fill-extrusion-opacity': 0.18,
+          'fill-extrusion-base': 0,
+          'fill-extrusion-height': [
+            'case',
+            ['all', ['boolean', ['feature-state', 'hover'], false], ['!=', ['get', 'state_code'], activeState]],
+            14000,
+            0,
+          ] as any,
+          'fill-extrusion-height-transition': { duration: 180, delay: 0 },
+          'fill-extrusion-opacity-transition': { duration: 180, delay: 0 },
+        },
+      }, beforeId)
+    }
+    if (!map.getLayer(STATE_INTERACT_LINE)) {
+      map.addLayer({
+        id: STATE_INTERACT_LINE,
+        type: 'line',
+        source: STATE_INTERACT_SRC,
+        paint: {
+          'line-color': [
+            'case',
+            ['boolean', ['feature-state', 'hover'], false], avalonPalette.textBright,
+            ['==', ['get', 'state_code'], activeState], avalonPalette.signal,
+            avalonPalette.borderSoft,
+          ] as any,
+          'line-width': [
+            'case',
+            ['boolean', ['feature-state', 'hover'], false], 2.2,
+            ['==', ['get', 'state_code'], activeState], 1.7,
+            0.9,
+          ] as any,
+          'line-opacity': 0.95,
+        },
+      }, beforeId)
+    }
+
+    // Keep active-state style in sync without re-adding layers.
+    map.setPaintProperty(STATE_INTERACT_FILL, 'fill-opacity', [
+      'case',
+      ['boolean', ['feature-state', 'hover'], false], 0.22,
+      ['==', ['get', 'state_code'], activeState], 0.11,
+      0.035,
+    ] as any)
+    map.setPaintProperty(STATE_INTERACT_EXTRUDE, 'fill-extrusion-height', [
+      'case',
+      ['all', ['boolean', ['feature-state', 'hover'], false], ['!=', ['get', 'state_code'], activeState]],
+      14000,
+      0,
+    ] as any)
+    map.setPaintProperty(STATE_INTERACT_LINE, 'line-color', [
+      'case',
+      ['boolean', ['feature-state', 'hover'], false], avalonPalette.textBright,
+      ['==', ['get', 'state_code'], activeState], avalonPalette.signal,
+      avalonPalette.borderSoft,
+    ] as any)
+    map.setPaintProperty(STATE_INTERACT_LINE, 'line-width', [
+      'case',
+      ['boolean', ['feature-state', 'hover'], false], 2.2,
+      ['==', ['get', 'state_code'], activeState], 1.7,
+      0.9,
+    ] as any)
+
+    detachStateInteractHandlers(map)
+    const onMove = (e: any) => {
+      const f = e.features?.[0]
+      const id = f?.id
+      if (id == null) {
+        clearHoveredState(map)
+        map.getCanvas().style.cursor = ''
+        return
+      }
+      if (hoveredStateFeatureIdRef.current === id) return
+      clearHoveredState(map)
+      hoveredStateFeatureIdRef.current = id as string | number
+      try {
+        map.setFeatureState({ source: STATE_INTERACT_SRC, id }, { hover: true })
+      } catch { /* ignore */ }
+      const code = String(f?.properties?.state_code ?? '').toUpperCase()
+      map.getCanvas().style.cursor = code && code !== activeState ? 'pointer' : ''
+    }
+    const onLeave = () => {
+      clearHoveredState(map)
+      map.getCanvas().style.cursor = ''
+    }
+    const onEnter = () => {
+      map.getCanvas().style.cursor = 'pointer'
+    }
+    const onClick = (e: any) => {
+      const f = e.features?.[0]
+      if (!f) return
+      const code = String(f.properties?.state_code ?? '').toUpperCase()
+      if (!code || code === activeState) return
+      setActiveState(code)
+    }
+
+    map.on('mousemove', STATE_INTERACT_FILL, onMove)
+    map.on('mouseenter', STATE_INTERACT_FILL, onEnter)
+    map.on('mouseleave', STATE_INTERACT_FILL, onLeave)
+    map.on('click', STATE_INTERACT_FILL, onClick)
+    stateInteractHandlersRef.current = [
+      { type: 'mousemove', layerId: STATE_INTERACT_FILL, fn: onMove },
+      { type: 'mouseenter', layerId: STATE_INTERACT_FILL, fn: onEnter },
+      { type: 'mouseleave', layerId: STATE_INTERACT_FILL, fn: onLeave },
+      { type: 'click', layerId: STATE_INTERACT_FILL, fn: onClick },
+    ]
+  }, [activeState, clearHoveredState, detachStateInteractHandlers, setActiveState, stateBoundaryFC])
 
   const activeParcelLayerKey = useMemo(() => {
     const target = `${activeState.toLowerCase()}_parcels`
@@ -703,6 +880,12 @@ export default function SitingPanel() {
       })
     }).catch(e => setError(String(e)))
     fetchSitingStates().then(r => setStateOptions(r.states)).catch(() => { /* non-fatal */ })
+    fetchSitingStateBoundaries(false).then((fc) => {
+      setStateBoundaryFC({
+        type: 'FeatureCollection',
+        features: Array.isArray(fc.features) ? fc.features : [],
+      })
+    }).catch(() => { /* non-fatal */ })
     fetchSitingMoratoriums().then(r => setMoratoriums(r.counties)).catch(() => { /* non-fatal */ })
   }, [])
 
@@ -769,6 +952,7 @@ export default function SitingPanel() {
         flyReloadTimerRef.current = null
       }
       detachSiteHandlers(map)
+      detachStateInteractHandlers(map)
       drawCtrlRef.current?.destroy()
       drawCtrlRef.current = null
       map.remove()
@@ -780,6 +964,13 @@ export default function SitingPanel() {
     // every overlay) before that setStyle restoration logic could run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    if ((stateBoundaryFC.features?.length ?? 0) === 0) return
+    syncStateInteractLayers(map)
+  }, [mapReady, stateBoundaryFC, activeState, syncStateInteractLayers])
 
   // ── candidate site source/layer (re-render when sites change) ─────────
   useEffect(() => {
@@ -1340,6 +1531,7 @@ export default function SitingPanel() {
     if (!map || !mapReady) return
     const target = styleFor(basemap)
     detachSiteHandlers(map)
+    detachStateInteractHandlers(map)
     map.setStyle(target as any)
     map.once('styledata', () => {
       // The site source/layers and overlays were dropped with the old style.
@@ -1350,6 +1542,7 @@ export default function SitingPanel() {
       setSites(s => [...s])
       // Re-add KMZ-import + drawn-feature layers and re-hydrate their data.
       ensureOverlayLayers(map)
+      if ((stateBoundaryFC.features?.length ?? 0) > 0) syncStateInteractLayers(map)
       if (importedFCRef.current) setSourceData(map, IMPORT_SRC, importedFCRef.current)
       // DrawController re-renders into DRAWN_SRC on next setMode/setFeatures call.
       drawCtrlRef.current?.setFeatures(drawnFeaturesRef.current)
@@ -1362,7 +1555,7 @@ export default function SitingPanel() {
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basemap, detachSiteHandlers])
+  }, [basemap, detachSiteHandlers, detachStateInteractHandlers, stateBoundaryFC, syncStateInteractLayers])
 
   // ── re-score on archetype / weight changes ────────────────────────────
   async function rescoreAll() {

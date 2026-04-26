@@ -2904,6 +2904,37 @@ def siting_states():
     }
 
 
+@app.get("/api/siting/state_boundaries")
+def siting_state_boundaries(duke_only: bool = False):
+    """Return clickable state polygons for map hover/click interactions."""
+    codes = DUKE_STATES if duke_only else [c for c in US_STATE_BBOX.keys() if len(c) == 2]
+    features: list[dict] = []
+    warnings: list[str] = []
+    for code in codes:
+        try:
+            fc = _state_boundary_fc(code)
+            for f in (fc.get("features") or []):
+                props = dict(f.get("properties") or {})
+                props["state_code"] = str(props.get("STUSAB") or code).upper()
+                features.append({
+                    "type": "Feature",
+                    "geometry": f.get("geometry"),
+                    "properties": props,
+                })
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{code}: {exc}")
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "_meta": {
+            "returned": len(features),
+            "states_requested": len(codes),
+            "duke_only": duke_only,
+            "warnings": warnings,
+        },
+    }
+
+
 @app.get("/api/siting/moratoriums")
 def siting_moratoriums():
     return {"counties": COUNTY_MORATORIUMS}

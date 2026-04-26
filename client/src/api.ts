@@ -277,6 +277,16 @@ export async function fetchSitingStates(signal?: AbortSignal): Promise<{ states:
   return fetchJson(`${BASE}/api/siting/states`, 'siting/states', { signal })
 }
 
+export async function fetchSitingStateBoundaries(
+  dukeOnly = false,
+  signal?: AbortSignal,
+): Promise<{ type: 'FeatureCollection'; features: Array<Record<string, unknown>>; _meta?: Record<string, unknown> }> {
+  const params = new URLSearchParams()
+  if (dukeOnly) params.set('duke_only', 'true')
+  const suffix = params.toString() ? `?${params}` : ''
+  return fetchJson(`${BASE}/api/siting/state_boundaries${suffix}`, 'siting/state_boundaries', { signal })
+}
+
 export async function fetchSitingMoratoriums(signal?: AbortSignal): Promise<{ counties: MoratoriumCounty[] }> {
   return fetchJson(`${BASE}/api/siting/moratoriums`, 'siting/moratoriums', { signal })
 }
